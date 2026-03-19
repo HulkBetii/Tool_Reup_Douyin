@@ -10,7 +10,294 @@ def get_prompt_presets_dir(project_root: Path) -> Path:
     return project_root / "presets" / "prompts"
 
 
-def list_prompt_templates(project_root: Path) -> list[TranslationPromptTemplate]:
+def default_translation_mode_for_languages(source_language: str, target_language: str) -> str:
+    if source_language.lower() == "zh" and target_language.lower() == "vi":
+        return "contextual_v2"
+    return "legacy"
+
+
+def _contextual_templates() -> list[TranslationPromptTemplate]:
+    return [
+        TranslationPromptTemplate(
+            template_id="contextual_default_scene_planner",
+            family_id="contextual-default-vi",
+            translation_mode="contextual_v2",
+            role="scene_planner",
+            name="Contextual mặc định / Planner",
+            category="contextual",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "You plan Chinese-to-Vietnamese dialogue translation at the scene level. "
+                "Summarize the scene, identify likely participants, track ambiguities, and propose "
+                "character or directional relationship updates only when there is evidence. "
+                "Use hypothesized or unknown values instead of inventing certainty."
+            ),
+            user_prompt_template=(
+                "Plan the current scene for contextual dialogue translation from {source_language} to "
+                "{target_language}. Use Context, Glossary, and Constraints to keep discourse memory stable. "
+                "Ground every update in the provided scene payload and keep ambiguous points inside the "
+                "scene output rather than resolving them aggressively. "
+                "Context: {context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Contextual V2 planner tuned to keep hypotheses explicit.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_default_semantic",
+            family_id="contextual-default-vi",
+            translation_mode="contextual_v2",
+            role="semantic_pass",
+            name="Contextual mặc định / Semantic",
+            category="contextual",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Analyze Chinese-to-Vietnamese dialogue semantics. Return exactly one semantic item for "
+                "every segment in scene.segments. Preserve each segment_id verbatim. Never merge, omit, "
+                "duplicate, or reorder segments. Focus on who is speaking to whom, honorific policy, "
+                "ellipsis resolution, and safe in-world meaning. If anything is ambiguous, keep the "
+                "semantic_translation conservative and move the uncertainty into review fields. If an "
+                "uncertain noun repeats within a scene, keep one stable short neutral Vietnamese noun "
+                "phrase, such as 'mon do' or 'thu do' when the referent is unclear. Never emit technical "
+                "placeholder tokens or control words in user-facing text."
+            ),
+            user_prompt_template=(
+                "Analyze the semantics of the current batch from {source_language} to {target_language}. "
+                "The payload may be only part of a larger scene, but you must still return exactly one "
+                "item per segment inside scene.segments. Use Context, Glossary, and Constraints to keep "
+                "speaker, listener, and relationship decisions stable. If the same unresolved noun "
+                "repeats across nearby lines, keep one stable short neutral Vietnamese noun phrase across "
+                "those lines and never emit literal placeholder text. "
+                "Context: {context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Contextual V2 semantic pass tuned on real zh->vi dialogue data.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_default_adaptation",
+            family_id="contextual-default-vi",
+            translation_mode="contextual_v2",
+            role="dialogue_adaptation",
+            name="Contextual mặc định",
+            category="contextual",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Adapt approved semantic dialogue into subtitle_text and tts_text. Return exactly one "
+                "item for every segment in scene.segments and preserve each segment_id verbatim. "
+                "subtitle_text must stay concise and readable. tts_text may sound more oral, but it must "
+                "preserve the same honorific policy, speaker-listener relationship, and narrative intent. "
+                "Do not output translator notes or explanations to the audience. If a key noun remains "
+                "uncertain, keep one stable short neutral Vietnamese noun phrase across the scene and "
+                "never print technical placeholder text."
+            ),
+            user_prompt_template=(
+                "Write subtitle_text and tts_text for the current contextual batch from {source_language} "
+                "to {target_language}. Return exactly one item per segment inside scene.segments. Use "
+                "Context, Glossary, and Constraints to preserve the approved honorific policy. Keep all "
+                "user-facing text as in-world dialogue only. If a term remains ambiguous, choose the "
+                "safest natural line and move the uncertainty into review fields instead of explaining it "
+                "inside subtitle_text or tts_text. Keep recurring unresolved nouns consistent with a "
+                "short neutral Vietnamese phrase and never output placeholder tokens. Context: {context}. Glossary: {glossary}. "
+                "Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            default_constraints_json={"max_lines": 2, "max_cpl": 42, "target_cps": 18},
+            notes="Contextual V2 adaptation tuned to reduce honorific drift and viewer-facing notes.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_default_critic",
+            family_id="contextual-default-vi",
+            translation_mode="contextual_v2",
+            role="semantic_critic",
+            name="Contextual mặc định / Critic",
+            category="contextual",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Review contextual dialogue outputs for semantic consistency. Return exactly one critic "
+                "item for every segment in scene.segments and preserve each segment_id verbatim. Catch "
+                "honorific drift, wrong addressee, relationship drift, unjustified pronoun insertion, "
+                "and divergence between subtitle_text and tts_text. Treat literal placeholder tokens or "
+                "control words in user-facing text as an issue."
+            ),
+            user_prompt_template=(
+                "Review the current contextual batch from {source_language} to {target_language}. Return "
+                "exactly one critic item per segment inside scene.segments. Use Context, Glossary, and "
+                "Constraints to check discourse consistency instead of re-translating from scratch. "
+                "Context: {context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Contextual V2 critic tuned to keep one result per segment.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_cartoon_fun_scene_planner",
+            family_id="contextual-cartoon-fun-vi",
+            translation_mode="contextual_v2",
+            role="scene_planner",
+            name="Hoạt hình hài / Planner",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "You plan translation for humorous animation dialogue from Chinese to Vietnamese. "
+                "Identify the comedic setup, likely participants, relationship hints, and any ambiguity "
+                "that may affect pronouns, honorifics, or punchlines. Prefer explicit uncertainty over "
+                "confident guessing."
+            ),
+            user_prompt_template=(
+                "Plan the current humorous-animation scene from {source_language} to {target_language}. "
+                "Use Context, Glossary, and Constraints to preserve character relationships and comic "
+                "timing. If a key joke term stays ambiguous, record it in the scene output instead of "
+                "forcing a single interpretation. Context: {context}. Glossary: {glossary}. "
+                "Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Tuned on real Shinchan data to keep ambiguities visible for review.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_cartoon_fun_semantic",
+            family_id="contextual-cartoon-fun-vi",
+            translation_mode="contextual_v2",
+            role="semantic_pass",
+            name="Hoạt hình hài / Semantic",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Analyze humorous animation dialogue from Chinese to Vietnamese. Return exactly one "
+                "semantic item for every segment in scene.segments. Preserve each segment_id verbatim. "
+                "Never merge, omit, duplicate, or reorder segments. Keep the joke intent, but if "
+                "speaker, listener, honorifics, or a key term are ambiguous, use unknown values and "
+                "needs_human_review=true instead of guessing. semantic_translation must stay as in-world "
+                "dialogue, not translator notes or explanations for the audience. If an uncertain noun or "
+                "joke term repeats within a scene, keep one stable short neutral Vietnamese noun phrase, "
+                "such as 'mon do' or 'thu do' when needed, and never emit technical placeholder text."
+            ),
+            user_prompt_template=(
+                "Analyze the semantics of the current humorous-animation batch from {source_language} to "
+                "{target_language}. The payload may be only part of a larger scene, but you must still "
+                "return exactly one item per segment inside scene.segments. Use Context, Glossary, and "
+                "Constraints to keep relationships stable. If any term is ambiguous, keep the "
+                "semantic_translation as the safest in-world utterance and move the uncertainty into "
+                "review fields instead of explaining it in the dialogue text. If the same unresolved term "
+                "repeats, keep one stable short neutral Vietnamese noun phrase and never print placeholder "
+                "tokens. Context: {context}. "
+                "Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Tuned on real Shinchan sample to reduce missing segment ids and overconfident guesses.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_cartoon_fun_adaptation",
+            family_id="contextual-cartoon-fun-vi",
+            translation_mode="contextual_v2",
+            role="dialogue_adaptation",
+            name="Hoạt hình hài hước",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Adapt humorous animation dialogue into subtitle_text and tts_text. Return exactly one "
+                "item for every segment in scene.segments and preserve every segment_id verbatim. Do not "
+                "merge, omit, duplicate, or reorder segments. subtitle_text should be punchy and "
+                "readable. tts_text can sound more playful and oral, but it must keep the same "
+                "speaker-listener relationship and honorific policy. Never output translator notes, "
+                "explanations, or ambiguity glosses inside subtitle_text or tts_text. If a term is "
+                "ambiguous, choose the safest in-world line and send the uncertainty to review instead. "
+                "Keep repeated unresolved nouns consistent with a short neutral Vietnamese phrase and "
+                "never emit technical placeholder text."
+            ),
+            user_prompt_template=(
+                "Write subtitle_text and tts_text for the current humorous-animation batch from "
+                "{source_language} to {target_language}. Return exactly one item per segment inside "
+                "scene.segments. Use Context, Glossary, and Constraints to preserve the approved "
+                "honorific policy while keeping the dialogue lively. Keep all user-facing text as "
+                "in-world dialogue only; do not explain ambiguity to the audience. If something stays "
+                "uncertain, keep the line concise and move the doubt into review fields. Keep repeated "
+                "unresolved nouns consistent with a short neutral Vietnamese phrase and never output "
+                "placeholder tokens. Context: "
+                "{context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            default_constraints_json={"max_lines": 2, "max_cpl": 40, "target_cps": 18},
+            notes="Tuned on real Shinchan sample to keep one output per segment and avoid meta dialogue.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_cartoon_fun_critic",
+            family_id="contextual-cartoon-fun-vi",
+            translation_mode="contextual_v2",
+            role="semantic_critic",
+            name="Hoạt hình hài / Critic",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Review humorous animation dialogue for semantic consistency. Return exactly one critic "
+                "item for every segment in scene.segments. Preserve every segment_id verbatim. Catch "
+                "honorific drift, wrong addressee, relationship drift, and cases where the rewrite "
+                "changed the social tone or comedic intent. Treat literal placeholder tokens or control "
+                "words in user-facing dialogue as issues."
+            ),
+            user_prompt_template=(
+                "Review the current humorous-animation batch from {source_language} to {target_language}. "
+                "Return exactly one critic item per segment inside scene.segments. Use Context, Glossary, "
+                "and Constraints to verify discourse consistency without inventing missing facts. "
+                "Context: {context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Tuned on real Shinchan sample to avoid partial critic outputs.",
+        ),
+    ]
+
+
+def _default_prompt_templates(source_language: str, target_language: str) -> list[TranslationPromptTemplate]:
+    templates = [
+        TranslationPromptTemplate(
+            template_id="default-vi-style",
+            family_id="legacy-default-vi",
+            translation_mode="legacy",
+            role="legacy_translate",
+            name="Dịch tự nhiên",
+            category="mặc định",
+            source_lang=source_language or "auto",
+            target_lang=target_language or "vi",
+            system_prompt="You are a subtitle editor. Keep the meaning accurate, concise, and easy to read.",
+            user_prompt_template="Translate the following content to {target_language}: {source}",
+            output_schema_version=1,
+            default_constraints_json={"max_lines": 2, "max_cpl": 42, "target_cps": 18},
+        )
+    ]
+    if default_translation_mode_for_languages(source_language, target_language) != "contextual_v2":
+        return templates
+    templates.extend(_contextual_templates())
+    return templates
+
+
+def ensure_prompt_templates(project_root: Path, source_language: str, target_language: str) -> list[Path]:
+    presets_dir = get_prompt_presets_dir(project_root)
+    presets_dir.mkdir(parents=True, exist_ok=True)
+    existing_ids = {path.stem for path in presets_dir.glob("*.json")}
+    written_paths: list[Path] = []
+    for template in _default_prompt_templates(source_language, target_language):
+        path = presets_dir / f"{template.template_id}.json"
+        if template.template_id in existing_ids and path.exists():
+            continue
+        path.write_text(
+            json.dumps(template.model_dump(mode="json"), indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        written_paths.append(path)
+    return written_paths
+
+
+def list_prompt_templates(
+    project_root: Path,
+    *,
+    translation_mode: str | None = None,
+    role: str | None = None,
+) -> list[TranslationPromptTemplate]:
     presets_dir = get_prompt_presets_dir(project_root)
     if not presets_dir.exists():
         return []
@@ -19,7 +306,12 @@ def list_prompt_templates(project_root: Path) -> list[TranslationPromptTemplate]
     for path in sorted(presets_dir.glob("*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-            templates.append(TranslationPromptTemplate.model_validate(payload))
+            template = TranslationPromptTemplate.model_validate(payload)
+            if translation_mode and template.translation_mode != translation_mode:
+                continue
+            if role and template.role != role:
+                continue
+            templates.append(template)
         except Exception:
             continue
     return templates
@@ -32,6 +324,25 @@ def load_prompt_template(project_root: Path, template_id: str) -> TranslationPro
     raise FileNotFoundError(f"Khong tim thay prompt template: {template_id}")
 
 
+def resolve_prompt_family(
+    project_root: Path,
+    selected_template: TranslationPromptTemplate,
+) -> dict[str, TranslationPromptTemplate]:
+    family_id = selected_template.family_id or selected_template.template_id
+    templates = list_prompt_templates(
+        project_root,
+        translation_mode=selected_template.translation_mode,
+    )
+    family = {
+        template.role: template
+        for template in templates
+        if (template.family_id or template.template_id) == family_id
+    }
+    if selected_template.role not in family:
+        family[selected_template.role] = selected_template
+    return family
+
+
 def save_prompt_template(project_root: Path, template: TranslationPromptTemplate) -> Path:
     presets_dir = get_prompt_presets_dir(project_root)
     presets_dir.mkdir(parents=True, exist_ok=True)
@@ -41,4 +352,3 @@ def save_prompt_template(project_root: Path, template: TranslationPromptTemplate
         encoding="utf-8",
     )
     return path
-

@@ -13,6 +13,7 @@ from app.project.models import (
     ProjectRecord,
     ProjectWorkspace,
 )
+from app.translate.presets import default_translation_mode_for_languages, ensure_prompt_templates
 
 PROJECT_DIRS = (
     "assets",
@@ -49,17 +50,6 @@ def calculate_sha256(path: Path) -> str:
 
 
 def _write_default_presets(project_root: Path) -> None:
-    prompt_preset = {
-        "template_id": "default-vi-style",
-        "name": "Dich tu nhien",
-        "category": "mac dinh",
-        "source_lang": "auto",
-        "target_lang": "vi",
-        "system_prompt": "Ban la bien tap vien subtitle. Giu nghia, gon, de doc.",
-        "user_prompt_template": "Dich noi dung sau sang {target_language}: {source}",
-        "output_schema_version": 1,
-        "default_constraints_json": {"max_lines": 2, "max_cpl": 42, "target_cps": 18},
-    }
     export_preset = {
         "export_preset_id": "youtube-16x9",
         "name": "YouTube 16:9",
@@ -177,10 +167,6 @@ def _write_default_presets(project_root: Path) -> None:
         "notes": "Preset clone giong mau. Hay thay ref_audio_path/ref_text bang mau cua ban trong tab Long tieng & Audio.",
     }
 
-    (project_root / "presets" / "prompts" / "default_vi_style.json").write_text(
-        json.dumps(prompt_preset, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
     (project_root / "presets" / "exports" / "default_hardsub.json").write_text(
         json.dumps(export_preset, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -264,6 +250,10 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
 
     database = ProjectDatabase(database_path)
     database.initialize()
+    translation_mode = request.translation_mode or default_translation_mode_for_languages(
+        request.source_language,
+        request.target_language,
+    )
 
     project_record = ProjectRecord(
         project_id=project_id,
@@ -271,6 +261,7 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
         root_dir=str(root_dir),
         source_language=request.source_language,
         target_language=request.target_language,
+        translation_mode=translation_mode,
         created_at=now,
         updated_at=now,
         video_asset_id=asset_record.asset_id if asset_record else None,
@@ -285,6 +276,7 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
         database.insert_media_asset(asset_record)
 
     _write_default_presets(root_dir)
+    ensure_prompt_templates(root_dir, request.source_language, request.target_language)
 
     workspace = ProjectWorkspace(
         project_id=project_id,
@@ -312,6 +304,11 @@ def open_project(root_dir: Path) -> ProjectWorkspace:
     payload = json.loads(project_json_path.read_text(encoding="utf-8"))
     database = ProjectDatabase(database_path)
     database.initialize()
+    ensure_prompt_templates(
+        resolved_root,
+        str(payload.get("source_language", "auto")),
+        str(payload.get("target_language", "vi")),
+    )
     workspace = ProjectWorkspace(
         project_id=payload["project_id"],
         name=payload["name"],

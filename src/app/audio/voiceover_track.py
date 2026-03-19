@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -19,6 +20,9 @@ class VoiceTrackResult:
     voice_track_path: Path
     manifest_path: Path
     fitted_clips: list[SynthesizedSegmentArtifact] = field(default_factory=list)
+
+
+DEFAULT_MAX_BATCH_INPUTS = 24
 
 
 def _slot_duration_ms(artifact: SynthesizedSegmentArtifact) -> int:
@@ -85,6 +89,181 @@ def _run_ffmpeg(command: list[str]) -> None:
         raise RuntimeError((result.stderr or result.stdout or "FFmpeg that bai").strip())
 
 
+def _build_aligned_mix_command(
+    *,
+    ffmpeg_executable: str,
+    output_path: Path,
+    total_duration_ms: int,
+    artifacts: list[SynthesizedSegmentArtifact],
+) -> list[str]:
+    inputs = [
+        ffmpeg_executable,
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=r=48000:cl=stereo:d={max(0.001, total_duration_ms / 1000.0):.3f}",
+    ]
+    filter_parts: list[str] = []
+    mix_inputs = ["[0:a]"]
+    for input_index, artifact in enumerate(artifacts, start=1):
+        if not artifact.fitted_wav_path:
+            continue
+        inputs.extend(["-i", str(artifact.fitted_wav_path)])
+        filter_parts.append(
+            f"[{input_index}:a]adelay={artifact.start_ms}|{artifact.start_ms}[v{input_index}]"
+        )
+        mix_inputs.append(f"[v{input_index}]")
+
+    if len(mix_inputs) == 1:
+        filter_parts.append("[0:a]anull[out]")
+    else:
+        filter_parts.append("".join(mix_inputs) + f"amix=inputs={len(mix_inputs)}:normalize=0[out]")
+
+    inputs.extend(
+        [
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            "[out]",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            str(output_path),
+        ]
+    )
+    return inputs
+
+
+def _build_mix_tracks_command(
+    *,
+    ffmpeg_executable: str,
+    output_path: Path,
+    input_paths: list[Path],
+) -> list[str]:
+    command = [ffmpeg_executable, "-y"]
+    filter_parts: list[str] = []
+    mix_inputs: list[str] = []
+    for input_index, input_path in enumerate(input_paths):
+        command.extend(["-i", str(input_path)])
+        filter_parts.append(f"[{input_index}:a]aresample=48000[m{input_index}]")
+        mix_inputs.append(f"[m{input_index}]")
+
+    if not mix_inputs:
+        raise ValueError("Khong co input nao de mix")
+    if len(mix_inputs) == 1:
+        filter_parts.append(f"{mix_inputs[0]}anull[out]")
+    else:
+        filter_parts.append("".join(mix_inputs) + f"amix=inputs={len(mix_inputs)}:normalize=0[out]")
+
+    command.extend(
+        [
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            "[out]",
+            "-ac",
+            "2",
+            "-ar",
+            "48000",
+            str(output_path),
+        ]
+    )
+    return command
+
+
+def _render_voice_track_batches(
+    context: JobContext,
+    *,
+    ffmpeg_executable: str,
+    cache_dir: Path,
+    voice_track_path: Path,
+    total_duration_ms: int,
+    fitted_artifacts: list[SynthesizedSegmentArtifact],
+    max_batch_inputs: int,
+) -> None:
+    if max_batch_inputs < 1:
+        raise ValueError("max_batch_inputs phai lon hon 0")
+    if not fitted_artifacts:
+        _run_ffmpeg(
+            [
+                ffmpeg_executable,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"anullsrc=r=48000:cl=stereo:d={max(0.001, total_duration_ms / 1000.0):.3f}",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+                str(voice_track_path),
+            ]
+        )
+        return
+
+    if len(fitted_artifacts) <= max_batch_inputs:
+        _run_ffmpeg(
+            _build_aligned_mix_command(
+                ffmpeg_executable=ffmpeg_executable,
+                output_path=voice_track_path,
+                total_duration_ms=total_duration_ms,
+                artifacts=fitted_artifacts,
+            )
+        )
+        return
+
+    partial_dir = cache_dir / "partials"
+    partial_dir.mkdir(parents=True, exist_ok=True)
+    total_batches = math.ceil(len(fitted_artifacts) / max_batch_inputs)
+    current_paths: list[Path] = []
+
+    for batch_index, start in enumerate(range(0, len(fitted_artifacts), max_batch_inputs), start=1):
+        batch = fitted_artifacts[start : start + max_batch_inputs]
+        partial_path = partial_dir / f"aligned_batch_{batch_index:03d}.wav"
+        if not partial_path.exists():
+            _run_ffmpeg(
+                _build_aligned_mix_command(
+                    ffmpeg_executable=ffmpeg_executable,
+                    output_path=partial_path,
+                    total_duration_ms=total_duration_ms,
+                    artifacts=batch,
+                )
+            )
+        current_paths.append(partial_path)
+        progress = 80 + int(batch_index * 10 / max(1, total_batches))
+        context.report_progress(min(90, progress), f"Mix batch {batch_index}/{total_batches}")
+
+    level = 0
+    while len(current_paths) > 1:
+        next_paths: list[Path] = []
+        total_mix_batches = math.ceil(len(current_paths) / max_batch_inputs)
+        for batch_index, start in enumerate(range(0, len(current_paths), max_batch_inputs), start=1):
+            batch_paths = current_paths[start : start + max_batch_inputs]
+            if len(batch_paths) == 1:
+                next_paths.append(batch_paths[0])
+                continue
+            merged_path = partial_dir / f"mix_level_{level:02d}_{batch_index:03d}.wav"
+            if not merged_path.exists():
+                _run_ffmpeg(
+                    _build_mix_tracks_command(
+                        ffmpeg_executable=ffmpeg_executable,
+                        output_path=merged_path,
+                        input_paths=batch_paths,
+                    )
+                )
+            next_paths.append(merged_path)
+            progress = 90 + int(batch_index * 9 / max(1, total_mix_batches))
+            context.report_progress(min(99, progress), f"Gop batch {batch_index}/{total_mix_batches}")
+        current_paths = next_paths
+        level += 1
+
+    final_path = current_paths[0]
+    if final_path != voice_track_path:
+        shutil.copyfile(final_path, voice_track_path)
+
+
 def build_voice_track(
     context: JobContext,
     *,
@@ -92,6 +271,7 @@ def build_voice_track(
     artifacts: list[SynthesizedSegmentArtifact],
     ffmpeg_path: str | None,
     total_duration_ms: int,
+    max_batch_inputs: int = DEFAULT_MAX_BATCH_INPUTS,
 ) -> VoiceTrackResult:
     ffmpeg_executable = ffmpeg_path or shutil.which("ffmpeg")
     if not ffmpeg_executable:
@@ -152,44 +332,15 @@ def build_voice_track(
         )
         context.report_progress(min(80, int(index * 80 / total)), f"Fit clip {index}/{total}")
 
-    inputs = [
-        ffmpeg_executable,
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-        f"anullsrc=r=48000:cl=stereo:d={max(0.001, total_duration_ms / 1000.0):.3f}",
-    ]
-    filter_parts: list[str] = []
-    mix_inputs = ["[0:a]"]
-    for input_index, artifact in enumerate(fitted_artifacts, start=1):
-        if not artifact.fitted_wav_path:
-            continue
-        inputs.extend(["-i", str(artifact.fitted_wav_path)])
-        filter_parts.append(
-            f"[{input_index}:a]adelay={artifact.start_ms}|{artifact.start_ms}[v{input_index}]"
-        )
-        mix_inputs.append(f"[v{input_index}]")
-
-    if len(mix_inputs) == 1:
-        filter_parts.append("[0:a]anull[out]")
-    else:
-        filter_parts.append("".join(mix_inputs) + f"amix=inputs={len(mix_inputs)}:normalize=0[out]")
-
-    inputs.extend(
-        [
-            "-filter_complex",
-            ";".join(filter_parts),
-            "-map",
-            "[out]",
-            "-ac",
-            "2",
-            "-ar",
-            "48000",
-            str(voice_track_path),
-        ]
+    _render_voice_track_batches(
+        context,
+        ffmpeg_executable=ffmpeg_executable,
+        cache_dir=cache_dir,
+        voice_track_path=voice_track_path,
+        total_duration_ms=total_duration_ms,
+        fitted_artifacts=fitted_artifacts,
+        max_batch_inputs=max_batch_inputs,
     )
-    _run_ffmpeg(inputs)
     manifest_path.write_text(
         json.dumps(
             {

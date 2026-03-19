@@ -55,7 +55,12 @@ from app.project.database import (
     ProjectDatabase,
     USER_SUBTITLE_TRACK_KIND,
 )
-from app.project.models import ProjectInitRequest, ProjectWorkspace, SubtitleTrackRecord
+from app.project.models import (
+    ProjectInitRequest,
+    ProjectWorkspace,
+    RelationshipProfileRecord,
+    SubtitleTrackRecord,
+)
 from app.project.runtime_state import restore_pipeline_state
 from app.subtitle.editing import (
     build_subtitle_event_records,
@@ -82,12 +87,20 @@ from app.tts.presets import (
 from app.tts.sapi_engine import list_installed_sapi_voices
 from app.tts.vieneu_engine import detect_vieneu_installation, get_vieneu_mode
 from app.translate.openai_engine import OpenAITranslationEngine
+from app.translate.contextual_pipeline import (
+    build_contextual_translation_stage_hash,
+    load_cached_contextual_translation,
+    persist_contextual_translation_result,
+    recompute_semantic_qc,
+    restore_cached_contextual_translation,
+)
+from app.translate.contextual_runtime import run_contextual_translation
 from app.translate.persistence import (
     build_translation_stage_hash,
     load_cached_translations,
     persist_translations,
 )
-from app.translate.presets import list_prompt_templates
+from app.translate.presets import ensure_prompt_templates, list_prompt_templates
 from app.ui.status_panel import StatusPanel
 from app.version import APP_NAME, APP_VERSION
 
@@ -101,6 +114,7 @@ class MainWindow(QMainWindow):
         self._media_metadata: MediaMetadata | None = None
         self._audio_artifacts: ExtractedAudioArtifacts | None = None
         self._prompt_templates = []
+        self._pending_review_segment_id: str | None = None
         self._last_subtitle_outputs: dict[str, Path] = {}
         self._last_export_output: Path | None = None
         self._subtitle_editor_loading = False
@@ -315,9 +329,11 @@ class MainWindow(QMainWindow):
         self._word_timestamps_checkbox = QCheckBox("Lấy mốc thời gian theo từ")
         self._word_timestamps_checkbox.setChecked(True)
         self._prompt_combo = QComboBox()
+        self._translation_mode_info = self._create_info_label("legacy")
         self._translation_model_input = QLineEdit()
         self._translation_model_input.setPlaceholderText("gpt-4.1-mini")
         self._translation_summary = self._create_info_label("Chưa có kết quả dịch")
+        self._review_summary = self._create_info_label("Chưa có hàng review semantic")
 
         run_asr_button = QPushButton("Chạy ASR")
         run_asr_button.clicked.connect(self._run_asr_job)
@@ -331,6 +347,64 @@ class MainWindow(QMainWindow):
         translate_buttons.addStretch(1)
         translate_container = QWidget()
         translate_container.setLayout(translate_buttons)
+        review_group = QGroupBox("Review Ngữ Cảnh")
+        review_layout = QVBoxLayout(review_group)
+        review_layout.addWidget(self._review_summary)
+        self._review_table = QTableWidget(0, 7)
+        self._review_table.setHorizontalHeaderLabels(
+            ["#", "Scene", "Nguồn", "Speaker", "Listener", "Xưng hô", "Lý do"]
+        )
+        self._review_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._review_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._review_table.setAlternatingRowColors(True)
+        self._review_table.setWordWrap(True)
+        self._review_table.verticalHeader().setVisible(False)
+        self._review_table.setMinimumHeight(220)
+        review_header = self._review_table.horizontalHeader()
+        review_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        review_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        review_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        review_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        review_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        review_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        review_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self._review_table.itemSelectionChanged.connect(self._handle_review_selection_changed)
+        review_layout.addWidget(self._review_table)
+        self._review_context_text = QPlainTextEdit()
+        self._review_context_text.setReadOnly(True)
+        self._review_context_text.setMinimumHeight(120)
+        review_layout.addWidget(self._review_context_text)
+        review_form = QFormLayout()
+        self._review_speaker_input = QLineEdit()
+        self._review_listener_input = QLineEdit()
+        self._review_self_term_input = QLineEdit()
+        self._review_address_term_input = QLineEdit()
+        self._review_subtitle_input = QLineEdit()
+        self._review_tts_input = QLineEdit()
+        review_form.addRow("Speaker", self._review_speaker_input)
+        review_form.addRow("Listener", self._review_listener_input)
+        review_form.addRow("Tự xưng", self._review_self_term_input)
+        review_form.addRow("Gọi người nghe", self._review_address_term_input)
+        review_form.addRow("Phụ đề duyệt", self._review_subtitle_input)
+        review_form.addRow("Lời TTS duyệt", self._review_tts_input)
+        review_layout.addLayout(review_form)
+        review_button_row = QHBoxLayout()
+        reload_review_button = QPushButton("Nạp review")
+        reload_review_button.clicked.connect(self._reload_review_queue)
+        approve_line_button = QPushButton("Khóa dòng")
+        approve_line_button.clicked.connect(lambda checked=False: self._apply_review_resolution("line"))
+        approve_scene_button = QPushButton("Khóa scene")
+        approve_scene_button.clicked.connect(lambda checked=False: self._apply_review_resolution("scene"))
+        approve_relation_button = QPushButton("Khóa quan hệ")
+        approve_relation_button.clicked.connect(
+            lambda checked=False: self._apply_review_resolution("project-relationship")
+        )
+        review_button_row.addWidget(reload_review_button)
+        review_button_row.addWidget(approve_line_button)
+        review_button_row.addWidget(approve_scene_button)
+        review_button_row.addWidget(approve_relation_button)
+        review_button_row.addStretch(1)
+        review_layout.addLayout(review_button_row)
 
         form.addRow("Engine ASR", self._asr_engine_combo)
         form.addRow("Mô hình", self._asr_model_combo)
@@ -338,6 +412,7 @@ class MainWindow(QMainWindow):
         form.addRow("", self._vad_checkbox)
         form.addRow("", self._word_timestamps_checkbox)
         form.addRow("", run_asr_button)
+        form.addRow("Chế độ dịch", self._translation_mode_info)
         form.addRow("Mẫu prompt", self._prompt_combo)
         form.addRow("Mô hình dịch", self._translation_model_input)
         form.addRow("", translate_container)
@@ -345,6 +420,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._asr_summary)
         layout.addWidget(self._translation_summary)
         layout.addWidget(group)
+        layout.addWidget(review_group)
         layout.addWidget(
             self._build_placeholder_group(
                 "Hướng dẫn",
@@ -1487,6 +1563,7 @@ class MainWindow(QMainWindow):
         self._append_log_line(f"Mở workspace: {workspace.root_dir}")
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION} - {workspace.name}")
         self._reload_subtitle_editor_from_db(force=True)
+        self._reload_review_queue()
 
     def _restore_workspace_runtime_state(self, workspace: ProjectWorkspace) -> None:
         database = ProjectDatabase(workspace.database_path)
@@ -3201,8 +3278,29 @@ class MainWindow(QMainWindow):
         if not self._current_workspace:
             self._prompt_templates = []
             self._prompt_combo.clear()
+            self._translation_mode_info.setText("legacy")
             return
-        self._prompt_templates = list_prompt_templates(self._current_workspace.root_dir)
+        database = ProjectDatabase(self._current_workspace.database_path)
+        project_row = database.get_project()
+        source_language = str(project_row["source_language"] if project_row else "auto")
+        target_language = str(project_row["target_language"] if project_row else "vi")
+        ensure_prompt_templates(self._current_workspace.root_dir, source_language, target_language)
+        translation_mode = self._current_translation_mode(project_row)
+        if translation_mode == "contextual_v2":
+            self._prompt_templates = list_prompt_templates(
+                self._current_workspace.root_dir,
+                translation_mode=translation_mode,
+                role="dialogue_adaptation",
+            )
+            self._translation_mode_info.setText("Contextual V2")
+        else:
+            self._prompt_templates = list_prompt_templates(
+                self._current_workspace.root_dir,
+                translation_mode="legacy",
+            )
+            self._translation_mode_info.setText("Legacy")
+        if not self._prompt_templates:
+            self._prompt_templates = list_prompt_templates(self._current_workspace.root_dir)
         self._prompt_combo.clear()
         for template in self._prompt_templates:
             self._prompt_combo.addItem(f"{template.name} ({template.template_id})", template.template_id)
@@ -3215,6 +3313,351 @@ class MainWindow(QMainWindow):
             if template.template_id == template_id:
                 return template
         return self._prompt_templates[0]
+
+    def _current_translation_mode(self, project_row: object | None = None) -> str:
+        if not self._current_workspace:
+            return "legacy"
+        if project_row is None:
+            database = ProjectDatabase(self._current_workspace.database_path)
+            project_row = database.get_project()
+        if not project_row:
+            return "legacy"
+        try:
+            value = str(project_row["translation_mode"] or "").strip()
+        except Exception:
+            value = str(getattr(project_row, "translation_mode", "") or "").strip()
+        return value or "legacy"
+
+    @staticmethod
+    def _analysis_json_field(row: object, field: str, default: object) -> object:
+        try:
+            raw_value = row[field]
+        except Exception:
+            raw_value = getattr(row, field, default)
+        if raw_value in (None, ""):
+            return default
+        if isinstance(raw_value, (dict, list)):
+            return raw_value
+        try:
+            return json.loads(str(raw_value))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return default
+
+    def _reload_review_queue(self) -> None:
+        self._pending_review_segment_id = None
+        self._review_table.setRowCount(0)
+        self._review_context_text.clear()
+        for widget in (
+            self._review_speaker_input,
+            self._review_listener_input,
+            self._review_self_term_input,
+            self._review_address_term_input,
+            self._review_subtitle_input,
+            self._review_tts_input,
+        ):
+            widget.clear()
+        if not self._current_workspace:
+            self._review_summary.setText("Chưa có dự án")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        if self._current_translation_mode(database.get_project()) != "contextual_v2":
+            self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
+            return
+        review_rows = database.list_review_queue_items(self._current_workspace.project_id)
+        self._review_summary.setText(
+            f"Hàng review semantic: {len(review_rows)} dòng cần duyệt trước TTS/export"
+        )
+        self._review_table.setRowCount(len(review_rows))
+        for row_index, row in enumerate(review_rows):
+            speaker = self._analysis_json_field(row, "speaker_json", {})
+            listeners = self._analysis_json_field(row, "listeners_json", [])
+            policy = self._analysis_json_field(row, "honorific_policy_json", {})
+            reasons = self._analysis_json_field(row, "review_reason_codes_json", [])
+            items = [
+                QTableWidgetItem(str(int(row["segment_index"]) + 1)),
+                QTableWidgetItem(str(int(row["scene_index"]) + 1)),
+                QTableWidgetItem(str(row["source_text"] or "")),
+                QTableWidgetItem(str(speaker.get("character_id", "unknown"))),
+                QTableWidgetItem(
+                    str((listeners[0] or {}).get("character_id", "unknown")) if listeners else "unknown"
+                ),
+                QTableWidgetItem(
+                    f"{policy.get('self_term', '')}/{policy.get('address_term', '')}".strip("/")
+                ),
+                QTableWidgetItem(", ".join(str(item) for item in reasons) or str(row["review_question"] or "")),
+            ]
+            items[0].setData(Qt.ItemDataRole.UserRole, str(row["segment_id"]))
+            for column_index, item in enumerate(items):
+                self._review_table.setItem(row_index, column_index, item)
+        if review_rows:
+            self._review_table.selectRow(0)
+
+    def _handle_review_selection_changed(self) -> None:
+        if not self._current_workspace:
+            return
+        current_row = self._review_table.currentRow()
+        if current_row < 0:
+            return
+        id_item = self._review_table.item(current_row, 0)
+        if id_item is None:
+            return
+        segment_id = str(id_item.data(Qt.ItemDataRole.UserRole) or "")
+        if not segment_id:
+            return
+        self._pending_review_segment_id = segment_id
+        database = ProjectDatabase(self._current_workspace.database_path)
+        analysis_row = database.get_segment_analysis(self._current_workspace.project_id, segment_id)
+        if analysis_row is None:
+            return
+        speaker = self._analysis_json_field(analysis_row, "speaker_json", {})
+        listeners = self._analysis_json_field(analysis_row, "listeners_json", [])
+        policy = self._analysis_json_field(analysis_row, "honorific_policy_json", {})
+        self._review_speaker_input.setText(str(speaker.get("character_id", "")))
+        self._review_listener_input.setText(
+            str((listeners[0] or {}).get("character_id", "")) if listeners else ""
+        )
+        self._review_self_term_input.setText(str(policy.get("self_term", "")))
+        self._review_address_term_input.setText(str(policy.get("address_term", "")))
+        self._review_subtitle_input.setText(str(analysis_row["approved_subtitle_text"] or ""))
+        self._review_tts_input.setText(str(analysis_row["approved_tts_text"] or ""))
+
+        review_row = next(
+            (
+                row
+                for row in database.list_review_queue_items(self._current_workspace.project_id)
+                if str(row["segment_id"]) == segment_id
+            ),
+            None,
+        )
+        analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
+        analysis_by_index = {int(row["segment_index"]): row for row in analysis_rows}
+        segments = database.list_segments(self._current_workspace.project_id)
+        context_lines: list[str] = []
+        selected_index = int(analysis_row["segment_index"])
+        for row in segments[max(0, selected_index - 3) : selected_index + 4]:
+            row_index = int(row["segment_index"])
+            analysis_context_row = analysis_by_index.get(row_index)
+            prefix = ">>" if row_index == selected_index else "  "
+            context_lines.append(f"{prefix} [{row_index + 1}] ZH: {row['source_text'] or ''}")
+            subtitle_preview = ""
+            tts_preview = ""
+            if analysis_context_row is not None:
+                subtitle_preview = str(analysis_context_row["approved_subtitle_text"] or "")
+                tts_preview = str(analysis_context_row["approved_tts_text"] or "")
+            else:
+                subtitle_preview = str(row["subtitle_text"] or "")
+                tts_preview = str(row["tts_text"] or "")
+            if subtitle_preview or tts_preview:
+                context_lines.append(f"{prefix}        VI-sub: {subtitle_preview}")
+                context_lines.append(f"{prefix}        VI-tts: {tts_preview}")
+        review_reason_codes = self._analysis_json_field(analysis_row, "review_reason_codes_json", [])
+        review_question = str(analysis_row["review_question"] or "")
+        scene_summary = str(review_row["short_scene_summary"] or "") if review_row is not None else ""
+        self._review_context_text.setPlainText(
+            "\n".join(
+                [
+                    f"Scene: {analysis_row['scene_id']}",
+                    f"Tóm tắt scene: {self._review_table.item(current_row, 1).text() if self._review_table.item(current_row, 1) else ''}",
+                    f"Lý do: {', '.join(str(item) for item in review_reason_codes)}",
+                    f"Câu hỏi review: {review_question}",
+                    "",
+                    "Ngữ cảnh:",
+                    *context_lines,
+                ]
+            )
+        )
+        self._review_context_text.setPlainText(
+            "\n".join(
+                [
+                    f"Scene: {analysis_row['scene_id']}",
+                    f"Tóm tắt scene: {scene_summary}",
+                    f"Lý do: {', '.join(str(item) for item in review_reason_codes)}",
+                    f"Câu hỏi review: {review_question}",
+                    "",
+                    "Ngữ cảnh:",
+                    *context_lines,
+                ]
+            )
+        )
+        review_reason_text = ", ".join(str(item) for item in review_reason_codes) or "Khong co"
+        review_question_text = review_question or "Khong co"
+        self._review_context_text.setPlainText(
+            "\n".join(
+                [
+                    f"Scene: {analysis_row['scene_id']}",
+                    f"Tóm tắt scene: {scene_summary}",
+                    f"Lý do review: {review_reason_text}",
+                    f"Câu hỏi review: {review_question_text}",
+                    "",
+                    "Ngữ cảnh:",
+                    *context_lines,
+                ]
+            )
+        )
+
+    def _ensure_contextual_semantic_ready(self, database: ProjectDatabase, *, dialog_title: str) -> bool:
+        if not self._current_workspace:
+            return False
+        if self._current_translation_mode(database.get_project()) != "contextual_v2":
+            return True
+        analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
+        if not analysis_rows:
+            QMessageBox.warning(
+                self,
+                dialog_title,
+                "Chưa có kết quả Contextual V2. Hãy chạy dịch trước khi tiếp tục.",
+            )
+            return False
+        pending_rows = [
+            row
+            for row in analysis_rows
+            if bool(row["needs_human_review"]) or not bool(row["semantic_qc_passed"])
+        ]
+        if not pending_rows:
+            return True
+        self._reload_review_queue()
+        QMessageBox.warning(
+            self,
+            dialog_title,
+            (
+                f"Không thể tiếp tục vì còn {len(pending_rows)} dòng chưa qua semantic review/QC.\n"
+                "- Hãy xử lý các dòng trong bảng Review Ngữ Cảnh trước khi chạy TTS hoặc export."
+            ),
+        )
+        return False
+
+    def _apply_review_resolution(self, scope: str) -> None:
+        if not self._current_workspace:
+            return
+        segment_id = self._pending_review_segment_id
+        if not segment_id:
+            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        analysis_row = database.get_segment_analysis(self._current_workspace.project_id, segment_id)
+        project_row = database.get_project()
+        if analysis_row is None or project_row is None:
+            return
+        speaker_id = self._review_speaker_input.text().strip() or "unknown"
+        listener_id = self._review_listener_input.text().strip() or "unknown"
+        self_term = self._review_self_term_input.text().strip()
+        address_term = self._review_address_term_input.text().strip()
+        subtitle_text = self._review_subtitle_input.text().strip()
+        tts_text = self._review_tts_input.text().strip()
+        current_speaker = self._analysis_json_field(analysis_row, "speaker_json", {})
+        current_listeners = self._analysis_json_field(analysis_row, "listeners_json", [])
+        current_policy = self._analysis_json_field(analysis_row, "honorific_policy_json", {})
+        updated_speaker = {**current_speaker, "character_id": speaker_id, "source": "manual", "confidence": 1.0}
+        updated_listeners = (
+            [
+                {
+                    **(current_listeners[0] if current_listeners else {}),
+                    "character_id": listener_id,
+                    "role": "primary",
+                    "confidence": 1.0,
+                }
+            ]
+            if listener_id
+            else []
+        )
+        relationship_id = f"rel:{speaker_id}->{listener_id}"
+        updated_policy = {
+            **current_policy,
+            "policy_id": relationship_id,
+            "self_term": self_term,
+            "address_term": address_term,
+            "locked": True,
+            "confidence": 1.0,
+        }
+        target_rows = [analysis_row]
+        if scope != "line":
+            all_rows = database.list_segment_analyses(self._current_workspace.project_id)
+            selected_pair = (
+                str(current_speaker.get("character_id", "unknown")),
+                str((current_listeners[0] or {}).get("character_id", "unknown")) if current_listeners else "unknown",
+            )
+            if scope == "scene":
+                target_rows = [
+                    row
+                    for row in all_rows
+                    if str(row["scene_id"]) == str(analysis_row["scene_id"])
+                    and (
+                        str(self._analysis_json_field(row, "speaker_json", {}).get("character_id", "unknown")),
+                        str(
+                            (self._analysis_json_field(row, "listeners_json", [])[0] or {}).get(
+                                "character_id", "unknown"
+                            )
+                        )
+                        if self._analysis_json_field(row, "listeners_json", [])
+                        else "unknown",
+                    )
+                    == selected_pair
+                ]
+            elif scope == "project-relationship":
+                target_rows = [
+                    row
+                    for row in all_rows
+                    if (
+                        str(self._analysis_json_field(row, "speaker_json", {}).get("character_id", "unknown")),
+                        str(
+                            (self._analysis_json_field(row, "listeners_json", [])[0] or {}).get(
+                                "character_id", "unknown"
+                            )
+                        )
+                        if self._analysis_json_field(row, "listeners_json", [])
+                        else "unknown",
+                    )
+                    == selected_pair
+                ]
+                database.upsert_relationship_profiles(
+                    [
+                        RelationshipProfileRecord(
+                            relationship_id=relationship_id,
+                            project_id=self._current_workspace.project_id,
+                            from_character_id=speaker_id,
+                            to_character_id=listener_id,
+                            relation_type="manual_locked",
+                            default_self_term=self_term or None,
+                            default_address_term=address_term or None,
+                            allowed_alternates_json=[],
+                            scope="global",
+                            status="locked_by_human",
+                            created_at=utc_now_iso(),
+                            updated_at=utc_now_iso(),
+                        )
+                    ]
+                )
+        for row in target_rows:
+            database.update_segment_analysis_review(
+                self._current_workspace.project_id,
+                str(row["segment_id"]),
+                speaker_json=updated_speaker,
+                listeners_json=updated_listeners,
+                honorific_policy_json=updated_policy,
+                approved_subtitle_text=(
+                    subtitle_text
+                    if str(row["segment_id"]) == segment_id and subtitle_text
+                    else str(row["approved_subtitle_text"] or "")
+                ),
+                approved_tts_text=(
+                    tts_text
+                    if str(row["segment_id"]) == segment_id and tts_text
+                    else str(row["approved_tts_text"] or "")
+                ),
+                needs_human_review=False,
+                review_status="locked" if scope != "line" else "approved",
+                review_scope=scope,
+                review_reason_codes_json=[],
+                review_question="",
+            )
+        recompute_semantic_qc(
+            database,
+            project_id=self._current_workspace.project_id,
+            target_language=str(project_row["target_language"] or "vi"),
+        )
+        self._reload_subtitle_editor_from_db(force=True)
+        self._reload_review_queue()
+        self._refresh_workspace_views()
 
     def _run_translation_job(self) -> str | None:
         if not self._current_workspace:
@@ -3235,16 +3678,88 @@ class MainWindow(QMainWindow):
         source_language = segments[0]["source_lang"] or project_row["source_language"] or "auto"
         target_language = project_row["target_language"]
         model = self._translation_model_input.text().strip() or self._settings.default_translation_model
-        stage_hash = build_translation_stage_hash(
-            segments=segments,
-            template=template,
-            model=model,
-            source_language=source_language,
-            target_language=target_language,
-        )
+        translation_mode = self._current_translation_mode(project_row)
+        if translation_mode == "contextual_v2":
+            stage_hash = build_contextual_translation_stage_hash(
+                segments=segments,
+                template=template,
+                project_root=workspace.root_dir,
+                model=model,
+                source_language=source_language,
+                target_language=target_language,
+            )
+        else:
+            stage_hash = build_translation_stage_hash(
+                segments=segments,
+                template=template,
+                model=model,
+                source_language=source_language,
+                target_language=target_language,
+            )
         settings = self._settings
 
         def handler(context: JobContext) -> JobResult:
+            engine = OpenAITranslationEngine(settings)
+            if translation_mode == "contextual_v2":
+                cached_payload = load_cached_contextual_translation(workspace, stage_hash)
+                if cached_payload:
+                    cache_path = restore_cached_contextual_translation(
+                        workspace,
+                        database=database,
+                        payload=cached_payload,
+                        target_language=target_language,
+                    )
+                    qc_summary = recompute_semantic_qc(
+                        database,
+                        project_id=workspace.project_id,
+                        target_language=target_language,
+                    )
+                    context.report_progress(100, "Dùng lại cache Contextual V2")
+                    return JobResult(
+                        message="Dùng cache Contextual V2",
+                        output_paths=[cache_path],
+                        extra={
+                            "translated_count": len(database.list_segment_analyses(workspace.project_id)),
+                            "cache_path": cache_path,
+                            "translation_mode": translation_mode,
+                            "pending_review_count": database.count_pending_segment_reviews(workspace.project_id),
+                            "semantic_qc": qc_summary,
+                        },
+                    )
+                contextual_result = run_contextual_translation(
+                    context,
+                    workspace=workspace,
+                    database=database,
+                    engine=engine,
+                    segments=segments,
+                    selected_template=template,
+                    source_language=source_language,
+                    target_language=target_language,
+                    model=model,
+                )
+                cache_path = persist_contextual_translation_result(
+                    workspace,
+                    database=database,
+                    stage_hash=stage_hash,
+                    selected_template=template,
+                    target_language=target_language,
+                    scenes=contextual_result["scenes"],
+                    character_profiles=contextual_result["character_profiles"],
+                    relationship_profiles=contextual_result["relationship_profiles"],
+                    analyses=contextual_result["segment_analyses"],
+                )
+                return JobResult(
+                    message=f"Đã chạy Contextual V2 cho {len(contextual_result['segment_analyses'])} phân đoạn",
+                    output_paths=[cache_path],
+                    extra={
+                        "translated_count": len(contextual_result["segment_analyses"]),
+                        "cache_path": cache_path,
+                        "translation_mode": translation_mode,
+                        "pending_review_count": database.count_pending_segment_reviews(workspace.project_id),
+                        "semantic_qc": contextual_result["semantic_qc"],
+                    },
+                )
+
             cached = load_cached_translations(workspace, stage_hash)
             if cached:
                 database.apply_segment_translations(workspace.project_id, cached)
@@ -3253,10 +3768,13 @@ class MainWindow(QMainWindow):
                 return JobResult(
                     message=f"Dùng cache bản dịch cho {len(cached)} phân đoạn",
                     output_paths=[cache_path],
-                    extra={"translated_count": len(cached), "cache_path": cache_path},
+                    extra={
+                        "translated_count": len(cached),
+                        "cache_path": cache_path,
+                        "translation_mode": translation_mode,
+                    },
                 )
 
-            engine = OpenAITranslationEngine(settings)
             translated_items = engine.translate_segments(
                 context,
                 segments=segments,
@@ -3277,7 +3795,11 @@ class MainWindow(QMainWindow):
             return JobResult(
                 message=f"Đã dịch {len(translated_items)} phân đoạn",
                 output_paths=[cache_path],
-                extra={"translated_count": len(translated_items), "cache_path": cache_path},
+                extra={
+                    "translated_count": len(translated_items),
+                    "cache_path": cache_path,
+                    "translation_mode": translation_mode,
+                },
             )
 
         return self._job_manager.submit_job(
@@ -3311,6 +3833,8 @@ class MainWindow(QMainWindow):
             purpose="tts",
             dialog_title="TTS",
         ):
+            return None
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="TTS"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
         stage_hash = build_tts_stage_hash(
@@ -3406,6 +3930,8 @@ class MainWindow(QMainWindow):
             purpose="tts",
             dialog_title="Track giọng",
         ):
+            return None
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Track giọng"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
         stage_hash = build_tts_stage_hash(
@@ -3505,6 +4031,8 @@ class MainWindow(QMainWindow):
             purpose="tts",
             dialog_title="Trộn âm thanh",
         ):
+            return None
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Trộn âm thanh"):
             return None
         if not self._last_voice_track_output or not self._last_voice_track_output.exists():
             QMessageBox.warning(self, "Chưa có track giọng", "Hãy tạo track giọng trước khi trộn âm thanh.")
@@ -3606,6 +4134,11 @@ class MainWindow(QMainWindow):
             dialog_title=f"Xuất {format_name.upper()}",
         ):
             return None
+        if not self._ensure_contextual_semantic_ready(
+            database,
+            dialog_title=f"Xuất {format_name.upper()}",
+        ):
+            return None
         if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title=f"Xuất {format_name.upper()}"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
@@ -3668,6 +4201,8 @@ class MainWindow(QMainWindow):
             purpose="subtitle",
             dialog_title="Xuất video",
         ):
+            return None
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Xuất video"):
             return None
         if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title="Xuất video"):
             return None
@@ -3916,12 +4451,26 @@ class MainWindow(QMainWindow):
         elif stage == "translate" and self._current_workspace:
             translated_count = extra.get("translated_count", 0)
             cache_path = extra.get("cache_path")
+            translation_mode = extra.get("translation_mode", self._current_translation_mode())
+            pending_review_count = extra.get("pending_review_count")
+            semantic_qc = extra.get("semantic_qc") or {}
+            summary_lines = [
+                "Dịch hoàn tất:",
+                f"- Chế độ: {translation_mode}",
+                f"- Số dòng đã dịch: {translated_count}",
+                f"- Cache: {cache_path}",
+            ]
+            if pending_review_count is not None:
+                summary_lines.append(f"- Dòng cần review: {pending_review_count}")
+            if semantic_qc:
+                summary_lines.append(
+                    f"- Semantic QC: {semantic_qc.get('error_count', 0)} lỗi, {semantic_qc.get('warning_count', 0)} cảnh báo"
+                )
             self._translation_summary.setText(
-                "Dịch hoàn tất:\n"
-                f"- Số dòng đã dịch: {translated_count}\n"
-                f"- Cache: {cache_path}"
+                "\n".join(summary_lines)
             )
             self._reload_subtitle_editor_from_db(force=True)
+            self._reload_review_queue()
         elif stage in {"export_srt", "export_ass"}:
             output_path = extra.get("output_path")
             format_name = extra.get("format_name")
@@ -4011,12 +4560,26 @@ class MainWindow(QMainWindow):
         else:
             self._asr_summary.setText(f"Chưa có cache âm thanh. Phân đoạn trong CSDL: {segment_count}")
         target_language = project_row["target_language"] if project_row else "-"
+        translation_mode = self._current_translation_mode(project_row)
+        pending_review_count = (
+            database.count_pending_segment_reviews(self._current_workspace.project_id)
+            if translation_mode == "contextual_v2"
+            else 0
+        )
         self._translation_summary.setText(
             "Trạng thái dịch:\n"
+            f"- Chế độ: {translation_mode}\n"
             f"- Ngôn ngữ đích: {target_language}\n"
             f"- Mẫu prompt: {len(self._prompt_templates)}\n"
-            f"- Đã dịch: {translated_count}/{segment_count}"
+            f"- Đã dịch: {translated_count}/{segment_count}\n"
+            f"- Dòng cần review: {pending_review_count}"
         )
+        if translation_mode == "contextual_v2":
+            self._review_summary.setText(
+                f"Hàng review semantic: {pending_review_count} dòng cần duyệt trước TTS/export"
+            )
+        else:
+            self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
 
         current_preset = self._selected_voice_preset()
         tts_ready_count = sum(1 for row in subtitle_rows if row["audio_path"])
@@ -4226,6 +4789,3 @@ class MainWindow(QMainWindow):
 
     def _append_log_line(self, message: str) -> None:
         self._logs_console.appendPlainText(message)
-
-
-

@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from app.project.database import CANONICAL_SUBTITLE_TRACK_KIND, ProjectDatabase
-from app.project.models import ProjectRecord
+from app.project.models import ProjectRecord, SceneMemoryRecord, SegmentAnalysisRecord, SegmentRecord
 
 
 def test_initialize_migrates_existing_v1_project_to_subtitle_tracks(tmp_path: Path) -> None:
@@ -145,6 +145,7 @@ def test_initialize_migrates_existing_v1_project_to_subtitle_tracks(tmp_path: Pa
     assert subtitle_rows[0]["subtitle_text"] == "Xin chao"
     assert project_row is not None
     assert project_row["active_watermark_profile_id"] is None
+    assert project_row["translation_mode"] == "legacy"
 
 
 def test_project_database_persists_active_voice_export_and_watermark_presets(tmp_path: Path) -> None:
@@ -180,3 +181,204 @@ def test_project_database_persists_active_voice_export_and_watermark_presets(tmp
     assert project_row["active_voice_preset_id"] == "vieneu-default-vi"
     assert project_row["active_export_preset_id"] == "shorts-9x16"
     assert project_row["active_watermark_profile_id"] == "watermark-logo-top-right"
+
+
+def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-19T00:00:00+00:00",
+            updated_at="2026-03-19T00:00:00+00:00",
+        )
+    )
+    database.replace_segments(
+        "project-1",
+        [
+            SegmentRecord(
+                segment_id="seg-1",
+                project_id="project-1",
+                segment_index=0,
+                start_ms=0,
+                end_ms=1200,
+                source_lang="zh",
+                source_text="走吧",
+                source_text_norm="走吧",
+            )
+        ],
+    )
+    database.replace_contextual_translation_state(
+        "project-1",
+        scenes=[
+            SceneMemoryRecord(
+                scene_id="scene_0000",
+                project_id="project-1",
+                scene_index=0,
+                start_segment_index=0,
+                end_segment_index=0,
+                start_ms=0,
+                end_ms=1200,
+                short_scene_summary="A thúc B đi nhanh lên",
+                created_at="2026-03-19T00:00:00+00:00",
+                updated_at="2026-03-19T00:00:00+00:00",
+            )
+        ],
+        analyses=[
+            SegmentAnalysisRecord(
+                segment_id="seg-1",
+                project_id="project-1",
+                scene_id="scene_0000",
+                segment_index=0,
+                speaker_json={"character_id": "char_a", "confidence": 1.0},
+                listeners_json=[{"character_id": "char_b", "confidence": 1.0}],
+                honorific_policy_json={
+                    "policy_id": "rel:char_a->char_b",
+                    "self_term": "anh",
+                    "address_term": "em",
+                    "confidence": 1.0,
+                },
+                semantic_translation="Đi thôi",
+                approved_subtitle_text="Đi thôi",
+                approved_tts_text="Đi thôi em",
+                semantic_qc_passed=True,
+                review_status="approved",
+                created_at="2026-03-19T00:00:00+00:00",
+                updated_at="2026-03-19T00:00:00+00:00",
+            )
+        ],
+    )
+    database.apply_segment_analysis_outputs("project-1", target_language="vi")
+
+    scene_rows = database.list_scene_memories("project-1")
+    analysis_rows = database.list_segment_analyses("project-1")
+    segment_rows = database.list_segments("project-1")
+
+    assert len(scene_rows) == 1
+    assert len(analysis_rows) == 1
+    assert segment_rows[0]["subtitle_text"] == "Đi thôi"
+    assert segment_rows[0]["tts_text"] == "Đi thôi em"
+
+
+def test_project_database_review_queue_roundtrip(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-19T00:00:00+00:00",
+            updated_at="2026-03-19T00:00:00+00:00",
+        )
+    )
+    database.replace_segments(
+        "project-1",
+        [
+            SegmentRecord(
+                segment_id="seg-1",
+                project_id="project-1",
+                segment_index=0,
+                start_ms=0,
+                end_ms=1200,
+                source_lang="zh",
+                source_text="走吧",
+                source_text_norm="走吧",
+            )
+        ],
+    )
+    database.replace_contextual_translation_state(
+        "project-1",
+        scenes=[
+            SceneMemoryRecord(
+                scene_id="scene_0000",
+                project_id="project-1",
+                scene_index=0,
+                start_segment_index=0,
+                end_segment_index=0,
+                start_ms=0,
+                end_ms=1200,
+                short_scene_summary="A thúc B đi nhanh lên",
+                created_at="2026-03-19T00:00:00+00:00",
+                updated_at="2026-03-19T00:00:00+00:00",
+            )
+        ],
+        analyses=[
+            SegmentAnalysisRecord(
+                segment_id="seg-1",
+                project_id="project-1",
+                scene_id="scene_0000",
+                segment_index=0,
+                speaker_json={"character_id": "char_a", "confidence": 0.9},
+                listeners_json=[{"character_id": "char_b", "confidence": 0.6}],
+                honorific_policy_json={
+                    "policy_id": "rel:char_a->char_b",
+                    "self_term": "anh",
+                    "address_term": "em",
+                    "confidence": 0.8,
+                },
+                semantic_translation="Đi thôi",
+                approved_subtitle_text="Đi thôi",
+                approved_tts_text="Đi thôi em",
+                needs_human_review=True,
+                review_status="needs_review",
+                review_reason_codes_json=["LISTENER_AMBIGUOUS"],
+                review_question="A đang nói với B hay cả nhóm?",
+                semantic_qc_passed=False,
+                semantic_qc_issues_json=[
+                    {
+                        "code": "addressee_mismatch",
+                        "severity": "warning",
+                        "message": "Người nghe còn mơ hồ.",
+                    }
+                ],
+                created_at="2026-03-19T00:00:00+00:00",
+                updated_at="2026-03-19T00:00:00+00:00",
+            )
+        ],
+    )
+
+    assert database.count_pending_segment_reviews("project-1") == 1
+    review_rows = database.list_review_queue_items("project-1")
+    assert len(review_rows) == 1
+    assert review_rows[0]["source_text"] == "走吧"
+
+    database.update_segment_analysis_review(
+        "project-1",
+        "seg-1",
+        speaker_json={"character_id": "char_a", "confidence": 1.0},
+        listeners_json=[{"character_id": "char_b", "confidence": 1.0}],
+        approved_subtitle_text="Đi thôi em",
+        approved_tts_text="Đi thôi em",
+        needs_human_review=False,
+        review_status="locked",
+        review_scope="line",
+        review_reason_codes_json=[],
+        review_question="",
+        semantic_qc_passed=True,
+        semantic_qc_issues_json=[],
+    )
+    database.apply_segment_analysis_outputs("project-1", target_language="vi")
+
+    assert database.count_pending_segment_reviews("project-1") == 0
+    assert database.list_review_queue_items("project-1") == []
+
+    analysis_row = database.get_segment_analysis("project-1", "seg-1")
+    segment_row = database.list_segments("project-1")[0]
+
+    assert analysis_row is not None
+    assert analysis_row["review_status"] == "locked"
+    assert analysis_row["semantic_qc_passed"] == 1
+    assert segment_row["subtitle_text"] == "Đi thôi em"
+    assert segment_row["tts_text"] == "Đi thôi em"
+    assert segment_row["status"] == "translated"

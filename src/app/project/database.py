@@ -7,15 +7,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.project.models import (
+    CharacterProfileRecord,
     JobRunRecord,
     MediaAssetRecord,
     ProjectRecord,
+    RelationshipProfileRecord,
+    SceneMemoryRecord,
     SegmentRecord,
+    SegmentAnalysisRecord,
     SubtitleEventRecord,
     SubtitleTrackRecord,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 CANONICAL_SUBTITLE_TRACK_KIND = "canonical"
 USER_SUBTITLE_TRACK_KIND = "user"
 
@@ -33,6 +37,7 @@ CREATE TABLE IF NOT EXISTS projects (
     root_dir TEXT NOT NULL,
     source_language TEXT NOT NULL,
     target_language TEXT NOT NULL,
+    translation_mode TEXT NOT NULL DEFAULT 'legacy',
     video_asset_id TEXT,
     active_subtitle_track_id TEXT,
     active_voice_preset_id TEXT,
@@ -138,11 +143,138 @@ CREATE INDEX IF NOT EXISTS idx_subtitle_tracks_project_id ON subtitle_tracks(pro
 CREATE INDEX IF NOT EXISTS idx_subtitle_events_project_track ON subtitle_events(project_id, track_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_subtitle_events_track_index ON subtitle_events(track_id, event_index);
 CREATE INDEX IF NOT EXISTS idx_job_runs_project_id ON job_runs(project_id);
+
+CREATE TABLE IF NOT EXISTS character_profiles (
+    character_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    canonical_name_zh TEXT NOT NULL DEFAULT '',
+    canonical_name_vi TEXT NOT NULL DEFAULT '',
+    aliases_json TEXT NOT NULL DEFAULT '[]',
+    gender_hint TEXT,
+    age_role TEXT,
+    social_role TEXT,
+    speech_style TEXT,
+    default_register_profile_json TEXT NOT NULL DEFAULT '{}',
+    default_self_terms_json TEXT NOT NULL DEFAULT '[]',
+    default_address_terms_json TEXT NOT NULL DEFAULT '[]',
+    forbidden_terms_json TEXT NOT NULL DEFAULT '[]',
+    evidence_segment_ids_json TEXT NOT NULL DEFAULT '[]',
+    confidence REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'hypothesized',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS relationship_profiles (
+    relationship_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    from_character_id TEXT NOT NULL,
+    to_character_id TEXT NOT NULL,
+    relation_type TEXT NOT NULL DEFAULT 'unknown',
+    power_delta TEXT,
+    age_delta TEXT,
+    intimacy_level TEXT,
+    default_self_term TEXT,
+    default_address_term TEXT,
+    allowed_alternates_json TEXT NOT NULL DEFAULT '[]',
+    scope TEXT NOT NULL DEFAULT 'scene',
+    status TEXT NOT NULL DEFAULT 'hypothesized',
+    evidence_segment_ids_json TEXT NOT NULL DEFAULT '[]',
+    last_updated_scene_id TEXT,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS scene_memories (
+    scene_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scene_index INTEGER NOT NULL,
+    start_segment_index INTEGER NOT NULL,
+    end_segment_index INTEGER NOT NULL,
+    start_ms INTEGER NOT NULL,
+    end_ms INTEGER NOT NULL,
+    participants_json TEXT NOT NULL DEFAULT '[]',
+    location TEXT,
+    time_context TEXT,
+    short_scene_summary TEXT NOT NULL DEFAULT '',
+    recent_turn_digest TEXT NOT NULL DEFAULT '',
+    active_topic TEXT,
+    current_conflict TEXT,
+    current_emotional_tone TEXT,
+    temporary_addressing_mode TEXT,
+    who_knows_what_json TEXT NOT NULL DEFAULT '{}',
+    open_ambiguities_json TEXT NOT NULL DEFAULT '[]',
+    unresolved_references_json TEXT NOT NULL DEFAULT '[]',
+    status TEXT NOT NULL DEFAULT 'planned',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS segment_analyses (
+    segment_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    scene_id TEXT NOT NULL,
+    segment_index INTEGER NOT NULL,
+    speaker_json TEXT NOT NULL DEFAULT '{}',
+    listeners_json TEXT NOT NULL DEFAULT '[]',
+    register_json TEXT NOT NULL DEFAULT '{}',
+    turn_function TEXT,
+    resolved_ellipsis_json TEXT NOT NULL DEFAULT '{}',
+    honorific_policy_json TEXT NOT NULL DEFAULT '{}',
+    semantic_translation TEXT NOT NULL DEFAULT '',
+    glossary_hits_json TEXT NOT NULL DEFAULT '[]',
+    risk_flags_json TEXT NOT NULL DEFAULT '[]',
+    confidence_json TEXT NOT NULL DEFAULT '{}',
+    needs_human_review INTEGER NOT NULL DEFAULT 0,
+    review_status TEXT NOT NULL DEFAULT 'draft',
+    review_scope TEXT,
+    review_reason_codes_json TEXT NOT NULL DEFAULT '[]',
+    review_question TEXT NOT NULL DEFAULT '',
+    approved_subtitle_text TEXT NOT NULL DEFAULT '',
+    approved_tts_text TEXT NOT NULL DEFAULT '',
+    semantic_qc_passed INTEGER NOT NULL DEFAULT 0,
+    semantic_qc_issues_json TEXT NOT NULL DEFAULT '[]',
+    source_template_family_id TEXT,
+    adaptation_template_family_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+    FOREIGN KEY(scene_id) REFERENCES scene_memories(scene_id) ON DELETE CASCADE,
+    FOREIGN KEY(segment_id) REFERENCES segments(segment_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_character_profiles_project_id ON character_profiles(project_id);
+CREATE INDEX IF NOT EXISTS idx_relationship_profiles_project_id ON relationship_profiles(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relationship_profiles_direction ON relationship_profiles(project_id, from_character_id, to_character_id);
+CREATE INDEX IF NOT EXISTS idx_scene_memories_project_id ON scene_memories(project_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scene_memories_project_scene_index ON scene_memories(project_id, scene_index);
+CREATE INDEX IF NOT EXISTS idx_segment_analyses_project_id ON segment_analyses(project_id);
+CREATE INDEX IF NOT EXISTS idx_segment_analyses_scene_id ON segment_analyses(scene_id);
 """
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _json_loads(raw_value: object, default: object) -> object:
+    if raw_value in (None, ""):
+        return default
+    if isinstance(raw_value, (dict, list)):
+        return raw_value
+    try:
+        return json.loads(str(raw_value))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return default
 
 
 class ProjectDatabase:
@@ -181,6 +313,20 @@ class ProjectDatabase:
         }
         if "active_watermark_profile_id" not in columns:
             connection.execute("ALTER TABLE projects ADD COLUMN active_watermark_profile_id TEXT")
+        if "translation_mode" not in columns:
+            connection.execute(
+                "ALTER TABLE projects ADD COLUMN translation_mode TEXT NOT NULL DEFAULT 'legacy'"
+            )
+        connection.execute(
+            """
+            UPDATE projects
+            SET translation_mode = CASE
+                WHEN lower(source_language) = 'zh' AND lower(target_language) = 'vi' THEN 'contextual_v2'
+                ELSE 'legacy'
+            END
+            WHERE translation_mode IS NULL OR trim(translation_mode) = ''
+            """
+        )
 
     def _read_schema_version(self, connection: sqlite3.Connection) -> int:
         row = connection.execute(
@@ -208,11 +354,11 @@ class ProjectDatabase:
             connection.execute(
                 """
                 INSERT INTO projects(
-                    project_id, name, root_dir, source_language, target_language,
+                    project_id, name, root_dir, source_language, target_language, translation_mode,
                     video_asset_id, active_subtitle_track_id, active_voice_preset_id,
                     active_export_preset_id, active_watermark_profile_id, notes, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     project.project_id,
@@ -220,6 +366,7 @@ class ProjectDatabase:
                     project.root_dir,
                     project.source_language,
                     project.target_language,
+                    project.translation_mode,
                     project.video_asset_id,
                     project.active_subtitle_track_id,
                     project.active_voice_preset_id,
@@ -326,6 +473,38 @@ class ProjectDatabase:
     def get_project(self) -> sqlite3.Row | None:
         with self.connect() as connection:
             return connection.execute("SELECT * FROM projects LIMIT 1").fetchone()
+
+    def get_translation_mode(self, project_id: str) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT translation_mode
+                FROM projects
+                WHERE project_id = ?
+                LIMIT 1
+                """,
+                (project_id,),
+            ).fetchone()
+            if not row or not row["translation_mode"]:
+                return "legacy"
+            return str(row["translation_mode"])
+
+    def set_translation_mode(
+        self,
+        project_id: str,
+        translation_mode: str,
+        *,
+        updated_at: str | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE projects
+                SET translation_mode = ?, updated_at = ?
+                WHERE project_id = ?
+                """,
+                (translation_mode, updated_at or _utc_now_iso(), project_id),
+            )
 
     def get_active_voice_preset_id(self, project_id: str) -> str | None:
         with self.connect() as connection:
@@ -661,6 +840,647 @@ class ProjectDatabase:
                         project_id,
                         str(item["segment_id"]),
                     ),
+                )
+
+    def replace_scene_memories(self, project_id: str, scenes: list[SceneMemoryRecord]) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM scene_memories WHERE project_id = ?", (project_id,))
+            if scenes:
+                connection.executemany(
+                    """
+                    INSERT INTO scene_memories(
+                        scene_id, project_id, scene_index, start_segment_index, end_segment_index,
+                        start_ms, end_ms, participants_json, location, time_context,
+                        short_scene_summary, recent_turn_digest, active_topic, current_conflict,
+                        current_emotional_tone, temporary_addressing_mode, who_knows_what_json,
+                        open_ambiguities_json, unresolved_references_json, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            scene.scene_id,
+                            scene.project_id,
+                            scene.scene_index,
+                            scene.start_segment_index,
+                            scene.end_segment_index,
+                            scene.start_ms,
+                            scene.end_ms,
+                            _json_dumps(scene.participants_json),
+                            scene.location,
+                            scene.time_context,
+                            scene.short_scene_summary,
+                            scene.recent_turn_digest,
+                            scene.active_topic,
+                            scene.current_conflict,
+                            scene.current_emotional_tone,
+                            scene.temporary_addressing_mode,
+                            _json_dumps(scene.who_knows_what_json),
+                            _json_dumps(scene.open_ambiguities_json),
+                            _json_dumps(scene.unresolved_references_json),
+                            scene.status,
+                            scene.created_at,
+                            scene.updated_at,
+                        )
+                        for scene in scenes
+                    ],
+                )
+
+    def list_scene_memories(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM scene_memories
+                WHERE project_id = ?
+                ORDER BY scene_index ASC, start_segment_index ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def upsert_character_profiles(self, profiles: list[CharacterProfileRecord]) -> None:
+        if not profiles:
+            return
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO character_profiles(
+                    character_id, project_id, canonical_name_zh, canonical_name_vi, aliases_json,
+                    gender_hint, age_role, social_role, speech_style, default_register_profile_json,
+                    default_self_terms_json, default_address_terms_json, forbidden_terms_json,
+                    evidence_segment_ids_json, confidence, status, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(character_id) DO UPDATE SET
+                    canonical_name_zh = excluded.canonical_name_zh,
+                    canonical_name_vi = excluded.canonical_name_vi,
+                    aliases_json = excluded.aliases_json,
+                    gender_hint = excluded.gender_hint,
+                    age_role = excluded.age_role,
+                    social_role = excluded.social_role,
+                    speech_style = excluded.speech_style,
+                    default_register_profile_json = excluded.default_register_profile_json,
+                    default_self_terms_json = excluded.default_self_terms_json,
+                    default_address_terms_json = excluded.default_address_terms_json,
+                    forbidden_terms_json = excluded.forbidden_terms_json,
+                    evidence_segment_ids_json = excluded.evidence_segment_ids_json,
+                    confidence = excluded.confidence,
+                    status = excluded.status,
+                    notes = excluded.notes,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        profile.character_id,
+                        profile.project_id,
+                        profile.canonical_name_zh,
+                        profile.canonical_name_vi,
+                        _json_dumps(profile.aliases_json),
+                        profile.gender_hint,
+                        profile.age_role,
+                        profile.social_role,
+                        profile.speech_style,
+                        _json_dumps(profile.default_register_profile_json),
+                        _json_dumps(profile.default_self_terms_json),
+                        _json_dumps(profile.default_address_terms_json),
+                        _json_dumps(profile.forbidden_terms_json),
+                        _json_dumps(profile.evidence_segment_ids_json),
+                        profile.confidence,
+                        profile.status,
+                        profile.notes,
+                        profile.created_at,
+                        profile.updated_at,
+                    )
+                    for profile in profiles
+                ],
+            )
+
+    def list_character_profiles(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM character_profiles
+                WHERE project_id = ?
+                ORDER BY canonical_name_vi ASC, canonical_name_zh ASC, character_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def upsert_relationship_profiles(self, relationships: list[RelationshipProfileRecord]) -> None:
+        if not relationships:
+            return
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO relationship_profiles(
+                    relationship_id, project_id, from_character_id, to_character_id, relation_type,
+                    power_delta, age_delta, intimacy_level, default_self_term, default_address_term,
+                    allowed_alternates_json, scope, status, evidence_segment_ids_json,
+                    last_updated_scene_id, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(project_id, from_character_id, to_character_id) DO UPDATE SET
+                    relationship_id = excluded.relationship_id,
+                    from_character_id = excluded.from_character_id,
+                    to_character_id = excluded.to_character_id,
+                    relation_type = excluded.relation_type,
+                    power_delta = excluded.power_delta,
+                    age_delta = excluded.age_delta,
+                    intimacy_level = excluded.intimacy_level,
+                    default_self_term = excluded.default_self_term,
+                    default_address_term = excluded.default_address_term,
+                    allowed_alternates_json = excluded.allowed_alternates_json,
+                    scope = excluded.scope,
+                    status = excluded.status,
+                    evidence_segment_ids_json = excluded.evidence_segment_ids_json,
+                    last_updated_scene_id = excluded.last_updated_scene_id,
+                    notes = excluded.notes,
+                    updated_at = excluded.updated_at
+                """,
+                [
+                    (
+                        relationship.relationship_id,
+                        relationship.project_id,
+                        relationship.from_character_id,
+                        relationship.to_character_id,
+                        relationship.relation_type,
+                        relationship.power_delta,
+                        relationship.age_delta,
+                        relationship.intimacy_level,
+                        relationship.default_self_term,
+                        relationship.default_address_term,
+                        _json_dumps(relationship.allowed_alternates_json),
+                        relationship.scope,
+                        relationship.status,
+                        _json_dumps(relationship.evidence_segment_ids_json),
+                        relationship.last_updated_scene_id,
+                        relationship.notes,
+                        relationship.created_at,
+                        relationship.updated_at,
+                    )
+                    for relationship in relationships
+                ],
+            )
+
+    def list_relationship_profiles(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM relationship_profiles
+                WHERE project_id = ?
+                ORDER BY from_character_id ASC, to_character_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def replace_segment_analyses(self, project_id: str, analyses: list[SegmentAnalysisRecord]) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM segment_analyses WHERE project_id = ?", (project_id,))
+            if analyses:
+                connection.executemany(
+                    """
+                    INSERT INTO segment_analyses(
+                        segment_id, project_id, scene_id, segment_index, speaker_json, listeners_json,
+                        register_json, turn_function, resolved_ellipsis_json, honorific_policy_json,
+                        semantic_translation, glossary_hits_json, risk_flags_json, confidence_json,
+                        needs_human_review, review_status, review_scope, review_reason_codes_json,
+                        review_question, approved_subtitle_text, approved_tts_text, semantic_qc_passed,
+                        semantic_qc_issues_json, source_template_family_id, adaptation_template_family_id,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            analysis.segment_id,
+                            analysis.project_id,
+                            analysis.scene_id,
+                            analysis.segment_index,
+                            _json_dumps(analysis.speaker_json),
+                            _json_dumps(analysis.listeners_json),
+                            _json_dumps(analysis.register_json),
+                            analysis.turn_function,
+                            _json_dumps(analysis.resolved_ellipsis_json),
+                            _json_dumps(analysis.honorific_policy_json),
+                            analysis.semantic_translation,
+                            _json_dumps(analysis.glossary_hits_json),
+                            _json_dumps(analysis.risk_flags_json),
+                            _json_dumps(analysis.confidence_json),
+                            1 if analysis.needs_human_review else 0,
+                            analysis.review_status,
+                            analysis.review_scope,
+                            _json_dumps(analysis.review_reason_codes_json),
+                            analysis.review_question,
+                            analysis.approved_subtitle_text,
+                            analysis.approved_tts_text,
+                            1 if analysis.semantic_qc_passed else 0,
+                            _json_dumps(analysis.semantic_qc_issues_json),
+                            analysis.source_template_family_id,
+                            analysis.adaptation_template_family_id,
+                            analysis.created_at,
+                            analysis.updated_at,
+                        )
+                        for analysis in analyses
+                    ],
+                )
+
+    def replace_contextual_translation_state(
+        self,
+        project_id: str,
+        *,
+        scenes: list[SceneMemoryRecord],
+        analyses: list[SegmentAnalysisRecord],
+        character_profiles: list[CharacterProfileRecord] | None = None,
+        relationship_profiles: list[RelationshipProfileRecord] | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM segment_analyses WHERE project_id = ?", (project_id,))
+            connection.execute("DELETE FROM scene_memories WHERE project_id = ?", (project_id,))
+            if scenes:
+                connection.executemany(
+                    """
+                    INSERT INTO scene_memories(
+                        scene_id, project_id, scene_index, start_segment_index, end_segment_index,
+                        start_ms, end_ms, participants_json, location, time_context,
+                        short_scene_summary, recent_turn_digest, active_topic, current_conflict,
+                        current_emotional_tone, temporary_addressing_mode, who_knows_what_json,
+                        open_ambiguities_json, unresolved_references_json, status, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            scene.scene_id,
+                            scene.project_id,
+                            scene.scene_index,
+                            scene.start_segment_index,
+                            scene.end_segment_index,
+                            scene.start_ms,
+                            scene.end_ms,
+                            _json_dumps(scene.participants_json),
+                            scene.location,
+                            scene.time_context,
+                            scene.short_scene_summary,
+                            scene.recent_turn_digest,
+                            scene.active_topic,
+                            scene.current_conflict,
+                            scene.current_emotional_tone,
+                            scene.temporary_addressing_mode,
+                            _json_dumps(scene.who_knows_what_json),
+                            _json_dumps(scene.open_ambiguities_json),
+                            _json_dumps(scene.unresolved_references_json),
+                            scene.status,
+                            scene.created_at,
+                            scene.updated_at,
+                        )
+                        for scene in scenes
+                    ],
+                )
+            if analyses:
+                connection.executemany(
+                    """
+                    INSERT INTO segment_analyses(
+                        segment_id, project_id, scene_id, segment_index, speaker_json, listeners_json,
+                        register_json, turn_function, resolved_ellipsis_json, honorific_policy_json,
+                        semantic_translation, glossary_hits_json, risk_flags_json, confidence_json,
+                        needs_human_review, review_status, review_scope, review_reason_codes_json,
+                        review_question, approved_subtitle_text, approved_tts_text, semantic_qc_passed,
+                        semantic_qc_issues_json, source_template_family_id, adaptation_template_family_id,
+                        created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            analysis.segment_id,
+                            analysis.project_id,
+                            analysis.scene_id,
+                            analysis.segment_index,
+                            _json_dumps(analysis.speaker_json),
+                            _json_dumps(analysis.listeners_json),
+                            _json_dumps(analysis.register_json),
+                            analysis.turn_function,
+                            _json_dumps(analysis.resolved_ellipsis_json),
+                            _json_dumps(analysis.honorific_policy_json),
+                            analysis.semantic_translation,
+                            _json_dumps(analysis.glossary_hits_json),
+                            _json_dumps(analysis.risk_flags_json),
+                            _json_dumps(analysis.confidence_json),
+                            1 if analysis.needs_human_review else 0,
+                            analysis.review_status,
+                            analysis.review_scope,
+                            _json_dumps(analysis.review_reason_codes_json),
+                            analysis.review_question,
+                            analysis.approved_subtitle_text,
+                            analysis.approved_tts_text,
+                            1 if analysis.semantic_qc_passed else 0,
+                            _json_dumps(analysis.semantic_qc_issues_json),
+                            analysis.source_template_family_id,
+                            analysis.adaptation_template_family_id,
+                            analysis.created_at,
+                            analysis.updated_at,
+                        )
+                        for analysis in analyses
+                    ],
+                )
+            if character_profiles:
+                connection.executemany(
+                    """
+                    INSERT INTO character_profiles(
+                        character_id, project_id, canonical_name_zh, canonical_name_vi, aliases_json,
+                        gender_hint, age_role, social_role, speech_style, default_register_profile_json,
+                        default_self_terms_json, default_address_terms_json, forbidden_terms_json,
+                        evidence_segment_ids_json, confidence, status, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(character_id) DO UPDATE SET
+                        canonical_name_zh = excluded.canonical_name_zh,
+                        canonical_name_vi = excluded.canonical_name_vi,
+                        aliases_json = excluded.aliases_json,
+                        gender_hint = excluded.gender_hint,
+                        age_role = excluded.age_role,
+                        social_role = excluded.social_role,
+                        speech_style = excluded.speech_style,
+                        default_register_profile_json = excluded.default_register_profile_json,
+                        default_self_terms_json = excluded.default_self_terms_json,
+                        default_address_terms_json = excluded.default_address_terms_json,
+                        forbidden_terms_json = excluded.forbidden_terms_json,
+                        evidence_segment_ids_json = excluded.evidence_segment_ids_json,
+                        confidence = excluded.confidence,
+                        status = excluded.status,
+                        notes = excluded.notes,
+                        updated_at = excluded.updated_at
+                    """,
+                    [
+                        (
+                            profile.character_id,
+                            profile.project_id,
+                            profile.canonical_name_zh,
+                            profile.canonical_name_vi,
+                            _json_dumps(profile.aliases_json),
+                            profile.gender_hint,
+                            profile.age_role,
+                            profile.social_role,
+                            profile.speech_style,
+                            _json_dumps(profile.default_register_profile_json),
+                            _json_dumps(profile.default_self_terms_json),
+                            _json_dumps(profile.default_address_terms_json),
+                            _json_dumps(profile.forbidden_terms_json),
+                            _json_dumps(profile.evidence_segment_ids_json),
+                            profile.confidence,
+                            profile.status,
+                            profile.notes,
+                            profile.created_at,
+                            profile.updated_at,
+                        )
+                        for profile in character_profiles
+                    ],
+                )
+            if relationship_profiles:
+                connection.executemany(
+                    """
+                    INSERT INTO relationship_profiles(
+                        relationship_id, project_id, from_character_id, to_character_id, relation_type,
+                        power_delta, age_delta, intimacy_level, default_self_term, default_address_term,
+                        allowed_alternates_json, scope, status, evidence_segment_ids_json,
+                        last_updated_scene_id, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(project_id, from_character_id, to_character_id) DO UPDATE SET
+                        relationship_id = excluded.relationship_id,
+                        from_character_id = excluded.from_character_id,
+                        to_character_id = excluded.to_character_id,
+                        relation_type = excluded.relation_type,
+                        power_delta = excluded.power_delta,
+                        age_delta = excluded.age_delta,
+                        intimacy_level = excluded.intimacy_level,
+                        default_self_term = excluded.default_self_term,
+                        default_address_term = excluded.default_address_term,
+                        allowed_alternates_json = excluded.allowed_alternates_json,
+                        scope = excluded.scope,
+                        status = excluded.status,
+                        evidence_segment_ids_json = excluded.evidence_segment_ids_json,
+                        last_updated_scene_id = excluded.last_updated_scene_id,
+                        notes = excluded.notes,
+                        updated_at = excluded.updated_at
+                    """,
+                    [
+                        (
+                            relationship.relationship_id,
+                            relationship.project_id,
+                            relationship.from_character_id,
+                            relationship.to_character_id,
+                            relationship.relation_type,
+                            relationship.power_delta,
+                            relationship.age_delta,
+                            relationship.intimacy_level,
+                            relationship.default_self_term,
+                            relationship.default_address_term,
+                            _json_dumps(relationship.allowed_alternates_json),
+                            relationship.scope,
+                            relationship.status,
+                            _json_dumps(relationship.evidence_segment_ids_json),
+                            relationship.last_updated_scene_id,
+                            relationship.notes,
+                            relationship.created_at,
+                            relationship.updated_at,
+                        )
+                        for relationship in relationship_profiles
+                    ],
+                )
+
+    def list_segment_analyses(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM segment_analyses
+                WHERE project_id = ?
+                ORDER BY segment_index ASC, segment_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def get_segment_analysis(self, project_id: str, segment_id: str) -> sqlite3.Row | None:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM segment_analyses
+                WHERE project_id = ? AND segment_id = ?
+                LIMIT 1
+                """,
+                (project_id, segment_id),
+            ).fetchone()
+
+    def count_pending_segment_reviews(self, project_id: str) -> int:
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM segment_analyses
+                WHERE project_id = ? AND (needs_human_review = 1 OR review_status = 'needs_review')
+                """,
+                (project_id,),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def list_review_queue_items(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT
+                    sa.*,
+                    s.source_text,
+                    s.start_ms,
+                    s.end_ms,
+                    sm.scene_index,
+                    sm.short_scene_summary,
+                    sm.open_ambiguities_json
+                FROM segment_analyses sa
+                JOIN segments s ON s.segment_id = sa.segment_id
+                JOIN scene_memories sm ON sm.scene_id = sa.scene_id
+                WHERE sa.project_id = ? AND (sa.needs_human_review = 1 OR sa.review_status = 'needs_review')
+                ORDER BY sa.segment_index ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def update_segment_analysis_review(
+        self,
+        project_id: str,
+        segment_id: str,
+        *,
+        speaker_json: dict[str, object] | None = None,
+        listeners_json: list[dict[str, object]] | None = None,
+        honorific_policy_json: dict[str, object] | None = None,
+        approved_subtitle_text: str | None = None,
+        approved_tts_text: str | None = None,
+        needs_human_review: bool | None = None,
+        review_status: str | None = None,
+        review_scope: str | None = None,
+        review_reason_codes_json: list[str] | None = None,
+        review_question: str | None = None,
+        semantic_qc_passed: bool | None = None,
+        semantic_qc_issues_json: list[dict[str, object]] | None = None,
+        updated_at: str | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE segment_analyses
+                SET speaker_json = COALESCE(?, speaker_json),
+                    listeners_json = COALESCE(?, listeners_json),
+                    honorific_policy_json = COALESCE(?, honorific_policy_json),
+                    approved_subtitle_text = COALESCE(?, approved_subtitle_text),
+                    approved_tts_text = COALESCE(?, approved_tts_text),
+                    needs_human_review = COALESCE(?, needs_human_review),
+                    review_status = COALESCE(?, review_status),
+                    review_scope = COALESCE(?, review_scope),
+                    review_reason_codes_json = COALESCE(?, review_reason_codes_json),
+                    review_question = COALESCE(?, review_question),
+                    semantic_qc_passed = COALESCE(?, semantic_qc_passed),
+                    semantic_qc_issues_json = COALESCE(?, semantic_qc_issues_json),
+                    updated_at = ?
+                WHERE project_id = ? AND segment_id = ?
+                """,
+                (
+                    _json_dumps(speaker_json) if speaker_json is not None else None,
+                    _json_dumps(listeners_json) if listeners_json is not None else None,
+                    _json_dumps(honorific_policy_json) if honorific_policy_json is not None else None,
+                    approved_subtitle_text,
+                    approved_tts_text,
+                    (1 if needs_human_review else 0) if needs_human_review is not None else None,
+                    review_status,
+                    review_scope,
+                    _json_dumps(review_reason_codes_json) if review_reason_codes_json is not None else None,
+                    review_question,
+                    (1 if semantic_qc_passed else 0) if semantic_qc_passed is not None else None,
+                    _json_dumps(semantic_qc_issues_json) if semantic_qc_issues_json is not None else None,
+                    updated_at or _utc_now_iso(),
+                    project_id,
+                    segment_id,
+                ),
+            )
+
+    def apply_segment_analysis_outputs(
+        self,
+        project_id: str,
+        *,
+        target_language: str | None = None,
+        sync_subtitle_track: bool = True,
+    ) -> None:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM segment_analyses
+                WHERE project_id = ?
+                ORDER BY segment_index ASC
+                """,
+                (project_id,),
+            ).fetchall()
+            for row in rows:
+                raw_segment_meta = connection.execute(
+                    "SELECT meta_json FROM segments WHERE project_id = ? AND segment_id = ? LIMIT 1",
+                    (project_id, str(row["segment_id"])),
+                ).fetchone()
+                segment_meta = _json_loads(raw_segment_meta["meta_json"] if raw_segment_meta else "{}", {})
+                if not isinstance(segment_meta, dict):
+                    segment_meta = {}
+                segment_meta["contextual_translation"] = {
+                    "scene_id": row["scene_id"],
+                    "review_status": row["review_status"],
+                    "needs_human_review": bool(row["needs_human_review"]),
+                    "semantic_qc_passed": bool(row["semantic_qc_passed"]),
+                    "speaker": _json_loads(row["speaker_json"], {}),
+                    "listeners": _json_loads(row["listeners_json"], []),
+                    "honorific_policy": _json_loads(row["honorific_policy_json"], {}),
+                    "semantic_qc_issues": _json_loads(row["semantic_qc_issues_json"], []),
+                }
+                translated_text = str(row["semantic_translation"] or "")
+                subtitle_text = str(row["approved_subtitle_text"] or "")
+                tts_text = str(row["approved_tts_text"] or "")
+                status = "review_pending" if row["needs_human_review"] else "translated"
+                connection.execute(
+                    """
+                    UPDATE segments
+                    SET target_lang = COALESCE(?, target_lang),
+                        translated_text = ?,
+                        translated_text_norm = ?,
+                        subtitle_text = ?,
+                        tts_text = ?,
+                        status = ?,
+                        meta_json = ?
+                    WHERE project_id = ? AND segment_id = ?
+                    """,
+                    (
+                        target_language,
+                        translated_text,
+                        " ".join(translated_text.split()),
+                        subtitle_text,
+                        tts_text,
+                        status,
+                        _json_dumps(segment_meta),
+                        project_id,
+                        str(row["segment_id"]),
+                    ),
+                )
+            if sync_subtitle_track:
+                track_row = self._ensure_canonical_subtitle_track_in_connection(
+                    connection,
+                    project_id,
+                    updated_at=_utc_now_iso(),
+                )
+                events = self._build_events_from_segments(connection, project_id, str(track_row["track_id"]))
+                self._replace_subtitle_events_for_track(
+                    connection,
+                    project_id,
+                    str(track_row["track_id"]),
+                    events,
+                    updated_at=_utc_now_iso(),
                 )
 
     def _backfill_subtitle_tracks(self, connection: sqlite3.Connection) -> None:

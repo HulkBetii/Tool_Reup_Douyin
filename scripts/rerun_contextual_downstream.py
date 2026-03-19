@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+from app.audio.mixdown import mix_audio_tracks
+from app.audio.voiceover_track import build_voice_track
+from app.core.jobs import CancellationToken, JobContext
+from app.core.settings import load_settings
+from app.media.extract_audio import extract_audio_artifacts, load_cached_audio_artifacts
+from app.media.ffprobe_service import probe_media
+from app.project.bootstrap import open_project, sync_project_snapshot
+from app.project.database import ProjectDatabase
+from app.subtitle.export import export_subtitles
+from app.subtitle.hardsub import export_hardsub_video
+from app.tts.factory import create_tts_engine
+from app.tts.pipeline import synthesize_segments
+from app.tts.presets import list_voice_presets
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+def _print(message: str) -> None:
+    print(message, flush=True)
+
+
+def _context(stage: str) -> JobContext:
+    return JobContext(
+        job_id=f"rerun-contextual-{stage}",
+        logger_name=f"scripts.rerun_contextual.{stage}",
+        cancellation_token=CancellationToken(),
+        progress_callback=lambda value, message: _print(f"[{stage}] {value:>3}% {message}"),
+    )
+
+
+def _resolve_voice_preset(project_root: Path, voice_preset_id: str):
+    for preset in list_voice_presets(project_root):
+        if preset.voice_preset_id == voice_preset_id:
+            return preset
+    raise RuntimeError(f"Khong tim thay voice preset: {voice_preset_id}")
+
+
+def _resolve_original_audio(workspace, database: ProjectDatabase, settings):
+    cached_artifacts = load_cached_audio_artifacts(workspace)
+    if cached_artifacts and cached_artifacts.audio_48k_path.exists():
+        return cached_artifacts
+    video_asset = database.get_primary_video_asset(workspace.project_id)
+    if video_asset is None:
+        raise RuntimeError("Khong tim thay video asset cua project")
+    metadata = probe_media(
+        Path(str(video_asset["path"])),
+        ffprobe_path=settings.dependency_paths.ffprobe_path,
+    )
+    return extract_audio_artifacts(
+        _context("extract_audio"),
+        workspace=workspace,
+        metadata=metadata,
+        ffmpeg_path=settings.dependency_paths.ffmpeg_path,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Rerun downstream TTS -> export for a contextual project.")
+    parser.add_argument("--project-root", required=True, type=Path)
+    parser.add_argument("--voice-preset-id", default="vieneu-default-vi")
+    parser.add_argument("--export-preset-id", default="youtube-16x9")
+    parser.add_argument("--original-volume", type=float, default=0.35)
+    parser.add_argument("--voice-volume", type=float, default=1.0)
+    args = parser.parse_args()
+
+    settings = load_settings()
+    workspace = open_project(args.project_root.expanduser().resolve())
+    database = ProjectDatabase(workspace.database_path)
+    project_row = database.get_project()
+    if project_row is None:
+        raise RuntimeError("Khong tim thay project row")
+
+    pending_review_count = database.count_pending_segment_reviews(workspace.project_id)
+    if pending_review_count != 0:
+        raise RuntimeError(f"Van con {pending_review_count} review item, chua the rerun downstream")
+
+    analysis_rows = database.list_segment_analyses(workspace.project_id)
+    has_semantic_qc_error = any(not bool(row["semantic_qc_passed"]) for row in analysis_rows)
+    if has_semantic_qc_error:
+        raise RuntimeError("Semantic QC chua sach, chua the rerun downstream")
+
+    database.set_active_voice_preset_id(workspace.project_id, args.voice_preset_id)
+    database.set_active_export_preset_id(workspace.project_id, args.export_preset_id)
+    sync_project_snapshot(workspace)
+
+    voice_preset = _resolve_voice_preset(workspace.root_dir, args.voice_preset_id)
+    segments = database.list_segments(workspace.project_id)
+    total_duration_ms = max(int(row["end_ms"]) for row in segments) if segments else 0
+    if total_duration_ms <= 0:
+        raise RuntimeError("Khong co segment hop le de rerun TTS/export")
+
+    original_audio = _resolve_original_audio(workspace, database, settings)
+    source_video_path = workspace.source_video_path
+    if source_video_path is None:
+        video_asset = database.get_primary_video_asset(workspace.project_id)
+        if video_asset is None:
+            raise RuntimeError("Khong tim thay source video")
+        source_video_path = Path(str(video_asset["path"]))
+
+    synthesized = synthesize_segments(
+        _context("tts"),
+        workspace=workspace,
+        segments=segments,
+        preset=voice_preset,
+        engine=create_tts_engine(voice_preset, project_root=workspace.root_dir),
+        allow_source_fallback=False,
+    )
+    voice_track = build_voice_track(
+        _context("voice_track"),
+        workspace=workspace,
+        artifacts=synthesized.artifacts,
+        ffmpeg_path=settings.dependency_paths.ffmpeg_path,
+        total_duration_ms=total_duration_ms,
+    )
+    mixed_audio = mix_audio_tracks(
+        _context("mixdown"),
+        workspace=workspace,
+        original_audio_path=original_audio.audio_48k_path,
+        voice_track_path=voice_track.voice_track_path,
+        ffmpeg_path=settings.dependency_paths.ffmpeg_path,
+        original_volume=args.original_volume,
+        voice_volume=args.voice_volume,
+    )
+    srt_path = export_subtitles(
+        workspace,
+        segments=segments,
+        format_name="srt",
+        allow_source_fallback=False,
+    )
+    ass_path = export_subtitles(
+        workspace,
+        segments=segments,
+        format_name="ass",
+        allow_source_fallback=False,
+    )
+    output_video = export_hardsub_video(
+        _context("export"),
+        workspace=workspace,
+        source_video_path=source_video_path,
+        subtitle_path=ass_path,
+        ffmpeg_path=settings.dependency_paths.ffmpeg_path,
+        duration_ms=total_duration_ms,
+        replacement_audio_path=mixed_audio.mixed_audio_path,
+        export_preset_id=args.export_preset_id,
+    )
+
+    summary = {
+        "project_root": str(workspace.root_dir),
+        "voice_preset_id": args.voice_preset_id,
+        "export_preset_id": args.export_preset_id,
+        "pending_review_count": pending_review_count,
+        "tts_manifest": str(synthesized.manifest_path),
+        "voice_track_path": str(voice_track.voice_track_path),
+        "mixed_audio_path": str(mixed_audio.mixed_audio_path),
+        "srt_path": str(srt_path),
+        "ass_path": str(ass_path),
+        "output_video": str(output_video),
+    }
+    summary_path = workspace.root_dir / "rerun_contextual_downstream_summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    _print(f"Summary: {summary_path}")
+    _print(f"Video: {output_video}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
