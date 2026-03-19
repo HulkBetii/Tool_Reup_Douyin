@@ -9,6 +9,7 @@ from typing import Any, Callable
 from app.core.jobs import JobContext
 from app.project.database import ProjectDatabase
 from app.project.models import CharacterProfileRecord, RelationshipProfileRecord, SceneMemoryRecord, SegmentAnalysisRecord
+from app.translate.relationship_memory import clone_allowed_alternates
 
 from .contextual_pipeline import (
     _build_context_payload,
@@ -174,7 +175,7 @@ def run_contextual_translation(
             intimacy_level=row["intimacy_level"],
             default_self_term=row["default_self_term"],
             default_address_term=row["default_address_term"],
-            allowed_alternates_json=json.loads(row["allowed_alternates_json"] or "[]"),
+            allowed_alternates_json=clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
             scope=row["scope"] or "scene",
             status=row["status"] or "hypothesized",
             evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),

@@ -1,0 +1,55 @@
+{
+  "fixture_id": "zh-vi-locked-relation-directionality-mismatch",
+  "class": "locked_relation_directionality_mismatch",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Relation memory da khoa yeu cau anh/em, nhung output lai dung toi/ban. Case nay phai block thay vi chi warning.",
+  "relationship_defaults": {
+    "char_a->char_b": {
+      "default_self_term": "anh",
+      "default_address_term": "em",
+      "allowed_alternates_json": [],
+      "status": "locked_by_human"
+    }
+  },
+  "segments": [
+    {
+      "segment_id": "seg-0041",
+      "segment_index": 41,
+      "scene_id": "scene_0009",
+      "source_text": "\u6211\u8ddf\u4f60\u8bf4\u4e86\uff0c\u5feb\u70b9\u8d70\u3002",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.94
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.95
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "confidence": 0.93
+      },
+      "confidence_json": {
+        "overall": 0.92,
+        "speaker": 0.94,
+        "listener": 0.95,
+        "relation": 0.93
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Tôi nói rồi, bạn mau đi đi.",
+      "approved_tts_text": "Tôi nói rồi, bạn mau đi đi."
+    }
+  ]
+}

@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 from app.project.database import CANONICAL_SUBTITLE_TRACK_KIND, ProjectDatabase
-from app.project.models import ProjectRecord, SceneMemoryRecord, SegmentAnalysisRecord, SegmentRecord
+from app.project.models import (
+    ProjectRecord,
+    RelationshipProfileRecord,
+    SceneMemoryRecord,
+    SegmentAnalysisRecord,
+    SegmentRecord,
+)
+from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 
 
 def test_initialize_migrates_existing_v1_project_to_subtitle_tracks(tmp_path: Path) -> None:
@@ -181,6 +189,64 @@ def test_project_database_persists_active_voice_export_and_watermark_presets(tmp
     assert project_row["active_voice_preset_id"] == "vieneu-default-vi"
     assert project_row["active_export_preset_id"] == "shorts-9x16"
     assert project_row["active_watermark_profile_id"] == "watermark-logo-top-right"
+
+
+def test_project_database_preserves_allowed_alternates_when_relationship_is_relocked(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-20T00:00:00+00:00",
+            updated_at="2026-03-20T00:00:00+00:00",
+        )
+    )
+    database.upsert_relationship_profiles(
+        [
+            RelationshipProfileRecord(
+                relationship_id="rel:char_a->char_b",
+                project_id="project-1",
+                from_character_id="char_a",
+                to_character_id="char_b",
+                relation_type="siblings",
+                default_self_term="anh",
+                default_address_term="em",
+                allowed_alternates_json={"self_terms": ["tao"], "address_terms": ["mày"]},
+                scope="global",
+                status="confirmed",
+                evidence_segment_ids_json=["seg-10"],
+                notes="existing policy",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:05:00+00:00",
+            )
+        ]
+    )
+
+    existing_row = database.list_relationship_profiles("project-1")[0]
+    locked_record = build_locked_relationship_record(
+        existing=relationship_record_from_row(existing_row, project_id="project-1"),
+        project_id="project-1",
+        relationship_id="rel:char_a->char_b",
+        speaker_id="char_a",
+        listener_id="char_b",
+        self_term="anh",
+        address_term="em",
+        now="2026-03-20T00:10:00+00:00",
+    )
+    database.upsert_relationship_profiles([locked_record])
+
+    updated_row = database.list_relationship_profiles("project-1")[0]
+
+    assert updated_row["status"] == "locked_by_human"
+    assert updated_row["relation_type"] == "siblings"
+    assert updated_row["notes"] == "existing policy"
+    assert json.loads(updated_row["allowed_alternates_json"]) == {"self_terms": ["tao"], "address_terms": ["mày"]}
 
 
 def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:

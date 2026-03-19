@@ -88,7 +88,7 @@ class RelationshipSeed(BaseModel):
     intimacy_level: str | None = None
     default_self_term: str | None = None
     default_address_term: str | None = None
-    allowed_alternates: list[str] = Field(default_factory=list)
+    allowed_alternates: list[str] | dict[str, list[str]] = Field(default_factory=list)
     scope: str = "scene"
     confidence: float = 0.0
     status: str = "hypothesized"

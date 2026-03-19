@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "description": "Manifest for committed semantic/regression fixtures.",
+  "conventions": {
+    "fixture_id_pattern": "short-kebab-case",
+    "owners": [
+      "translation",
+      "semantic-qc",
+      "tts-gate"
+    ],
+    "required_fields": [
+      "fixture_id",
+      "class",
+      "languages",
+      "kind",
+      "path",
+      "notes"
+    ]
+  },
+  "fixtures": [
+    {
+      "fixture_id": "zh-vi-tts-pronoun-injection-ambiguous-listener",
+      "class": "unsafe_pronoun_injection_under_ambiguous_listener",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/regression/zh-vi-tts-pronoun-injection-ambiguous-listener.json",
+      "notes": "TTS tu them xung ho khi listener va ellipsis evidence con yeu; phai fail-safe sang review va semantic QC error."
+    },
+    {
+      "fixture_id": "zh-vi-locked-relation-directionality-mismatch",
+      "class": "locked_relation_directionality_mismatch",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/regression/zh-vi-locked-relation-directionality-mismatch.json",
+      "notes": "Neu relation memory da locked_by_human hoac confirmed, sai self/address term phai la blocking semantic QC error."
+    },
+    {
+      "fixture_id": "zh-vi-locked-relation-allowed-alternates-safe",
+      "class": "locked_relation_allowed_alternates_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-locked-relation-allowed-alternates-safe.json",
+      "notes": "Allowed alternates duoc whitelist duoi locked relation phai duoc di qua an toan, khong bi directionality_mismatch block nham."
+    },
+    {
+      "fixture_id": "zh-vi-side-specific-alternates-self-safe",
+      "class": "side_specific_allowed_alternates_contract",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/regression/zh-vi-side-specific-alternates-self-safe.json",
+      "notes": "Alternates duoc whitelist rieng cho self phai cho phep self-term di qua ma khong can noi long phia address."
+    },
+    {
+      "fixture_id": "zh-vi-side-specific-alternates-address-does-not-relax-self",
+      "class": "side_specific_allowed_alternates_contract",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-side-specific-alternates-address-does-not-relax-self.json",
+      "notes": "Address-only alternates khong duoc bi ap nham sang self-term."
+    },
+    {
+      "fixture_id": "ui-review-lock-preserves-allowed-alternates",
+      "class": "review_lock_preserves_relationship_memory",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "ui_review",
+      "path": "tests/fixtures/regression/ui-review-lock-preserves-allowed-alternates.json",
+      "notes": "UI review lock khong duoc xoa allowed_alternates va metadata cua relationship da co."
+    }
+  ]
+}

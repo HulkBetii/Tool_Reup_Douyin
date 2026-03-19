@@ -1,0 +1,59 @@
+{
+  "fixture_id": "zh-vi-side-specific-alternates-address-does-not-relax-self",
+  "class": "side_specific_allowed_alternates_contract",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Address-term alternate chi hop le cho phia address. No khong duoc lam self-term di qua an toan.",
+  "relationship_defaults": {
+    "char_a->char_b": {
+      "default_self_term": "anh",
+      "default_address_term": "em",
+      "allowed_alternates_json": {
+        "address_terms": [
+          "mày"
+        ]
+      },
+      "status": "locked_by_human"
+    }
+  },
+  "segments": [
+    {
+      "segment_id": "seg-0062",
+      "segment_index": 62,
+      "scene_id": "scene_0011",
+      "source_text": "\u6211\u90fd\u8ddf\u4f60\u8bf4\u4e86\uff0c\u8d76\u7d27\u8ddf\u4e0a\u3002",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.95
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.95
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "mày",
+        "address_term": "em",
+        "confidence": 0.94
+      },
+      "confidence_json": {
+        "overall": 0.93,
+        "speaker": 0.95,
+        "listener": 0.95,
+        "relation": 0.94
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "May noi roi, em mau theo kip di.",
+      "approved_tts_text": "May noi roi, em mau theo kip di."
+    }
+  ]
+}

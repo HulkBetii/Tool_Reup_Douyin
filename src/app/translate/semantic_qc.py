@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Iterable
+
+from .relationship_memory import split_allowed_alternates_by_side
 
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
+LOCKED_RELATION_STATUSES = {"locked_by_human", "confirmed", "locked"}
 
 COMMON_VI_PRONOUNS = {
     "anh",
@@ -76,7 +80,9 @@ def _row_value(row: object, field: str, default: object = None) -> object:
 
 
 def _normalize_text(text: str) -> str:
-    return " ".join((text or "").strip().lower().replace("\n", " ").split())
+    # Normalize punctuation boundaries so "em," still counts as a vocative/pronoun.
+    normalized = re.sub(r"[^\w\s]", " ", (text or "").strip().lower().replace("\n", " "), flags=re.UNICODE)
+    return " ".join(normalized.split())
 
 
 def _contains_term(text: str, term: str) -> bool:
@@ -98,6 +104,10 @@ def _pair_key(row: object) -> tuple[str, str]:
     if isinstance(listeners, list) and listeners:
         primary_listener = str((listeners[0] or {}).get("character_id", "unknown"))
     return speaker_id, primary_listener
+
+
+def _relation_status_is_locked(status: object) -> bool:
+    return str(status or "").strip().lower() in LOCKED_RELATION_STATUSES
 
 
 def analyze_segment_analyses(
@@ -131,6 +141,8 @@ def analyze_segment_analyses(
 
         self_term = str(honorific_policy.get("self_term", "") or "").strip()
         address_term = str(honorific_policy.get("address_term", "") or "").strip()
+        weak_listener_evidence = listener_confidence < 0.5 or "listener_ambiguous" in risk_flags
+        weak_discourse_evidence = min(speaker_confidence, max(listener_confidence, ellipsis_confidence)) < 0.55
 
         if overall_confidence < confidence_threshold:
             issues.append(
@@ -143,7 +155,7 @@ def analyze_segment_analyses(
                 )
             )
 
-        if (self_term or address_term) and (listener_confidence < 0.5 or "listener_ambiguous" in risk_flags):
+        if (self_term or address_term) and weak_listener_evidence:
             issues.append(
                 SemanticQcIssue(
                     segment_id=segment_id,
@@ -154,7 +166,7 @@ def analyze_segment_analyses(
                 )
             )
 
-        if (self_term or address_term) and min(speaker_confidence, max(listener_confidence, ellipsis_confidence)) < 0.55:
+        if (self_term or address_term) and weak_discourse_evidence:
             issues.append(
                 SemanticQcIssue(
                     segment_id=segment_id,
@@ -181,13 +193,20 @@ def analyze_segment_analyses(
             sub_has_policy = _contains_term(subtitle_text, self_term) or _contains_term(subtitle_text, address_term)
             tts_has_policy = _contains_term(tts_text, self_term) or _contains_term(tts_text, address_term)
             if sub_has_policy != tts_has_policy:
+                unsafe_tts_only_injection = tts_has_policy and not sub_has_policy and (
+                    weak_listener_evidence or weak_discourse_evidence
+                )
                 issues.append(
                     SemanticQcIssue(
                         segment_id=segment_id,
                         segment_index=segment_index,
                         code="sub_tts_pronoun_divergence",
-                        severity="warning",
-                        message="Phụ đề và lời TTS chưa bám cùng policy xưng hô.",
+                        severity="error" if unsafe_tts_only_injection else "warning",
+                        message=(
+                            "Lời TTS đang tự thêm xưng hô khi bằng chứng người nghe/discourse còn yếu."
+                            if unsafe_tts_only_injection
+                            else "Phụ đề và lời TTS chưa bám cùng policy xưng hô."
+                        ),
                     )
                 )
 
@@ -211,31 +230,47 @@ def analyze_segment_analyses(
         relation_defaults = relationship_map.get(pair, {})
         expected_self_term = str(relation_defaults.get("default_self_term", "") or "")
         expected_address_term = str(relation_defaults.get("default_address_term", "") or "")
-        allowed_alternates = set(relation_defaults.get("allowed_alternates_json", []) or [])
+        allowed_self_alternates, allowed_address_alternates = split_allowed_alternates_by_side(
+            relation_defaults.get("allowed_alternates_json", [])
+        )
+        relation_status_locked = _relation_status_is_locked(relation_defaults.get("status"))
         if relation_confidence >= 0.7 and (expected_self_term or expected_address_term):
-            if expected_self_term and self_term and self_term != expected_self_term and self_term not in allowed_alternates:
-                issues.append(
-                    SemanticQcIssue(
-                        segment_id=segment_id,
-                        segment_index=segment_index,
-                        code="directionality_mismatch",
-                        severity="warning",
-                        message="Xưng hô tự xưng không khớp relation memory đã khóa/xác nhận.",
-                    )
-                )
             if (
-                expected_address_term
-                and address_term
-                and address_term != expected_address_term
-                and address_term not in allowed_alternates
+                expected_self_term
+                and self_term
+                and self_term != expected_self_term
+                and self_term not in allowed_self_alternates
             ):
                 issues.append(
                     SemanticQcIssue(
                         segment_id=segment_id,
                         segment_index=segment_index,
                         code="directionality_mismatch",
-                        severity="warning",
-                        message="Xưng hô gọi người nghe không khớp relation memory đã khóa/xác nhận.",
+                        severity="error" if relation_status_locked else "warning",
+                        message=(
+                            "Xưng hô tự xưng không khớp relation memory đã khóa/xác nhận."
+                            if relation_status_locked
+                            else "Xưng hô tự xưng không khớp relation memory hiện có."
+                        ),
+                    )
+                )
+            if (
+                expected_address_term
+                and address_term
+                and address_term != expected_address_term
+                and address_term not in allowed_address_alternates
+            ):
+                issues.append(
+                    SemanticQcIssue(
+                        segment_id=segment_id,
+                        segment_index=segment_index,
+                        code="directionality_mismatch",
+                        severity="error" if relation_status_locked else "warning",
+                        message=(
+                            "Xưng hô gọi người nghe không khớp relation memory đã khóa/xác nhận."
+                            if relation_status_locked
+                            else "Xưng hô gọi người nghe không khớp relation memory hiện có."
+                        ),
                     )
                 )
 

@@ -1,0 +1,59 @@
+{
+  "fixture_id": "zh-vi-side-specific-alternates-self-safe",
+  "class": "side_specific_allowed_alternates_contract",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Self-term alternate duoc whitelist rieng cho phia self. Case nay phai duoc pass, nhung contract cu chua ho tro side-specific alternates.",
+  "relationship_defaults": {
+    "char_a->char_b": {
+      "default_self_term": "anh",
+      "default_address_term": "em",
+      "allowed_alternates_json": {
+        "self_terms": [
+          "tao"
+        ]
+      },
+      "status": "locked_by_human"
+    }
+  },
+  "segments": [
+    {
+      "segment_id": "seg-0061",
+      "segment_index": 61,
+      "scene_id": "scene_0011",
+      "source_text": "\u6211\u8b66\u544a\u8fc7\u4f60\u4e86\uff0c\u5feb\u70b9\u8d70\u3002",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.95
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.95
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "tao",
+        "address_term": "em",
+        "confidence": 0.94
+      },
+      "confidence_json": {
+        "overall": 0.93,
+        "speaker": 0.95,
+        "listener": 0.95,
+        "relation": 0.94
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Tao canh bao roi, em mau di di.",
+      "approved_tts_text": "Tao canh bao roi, em mau di di."
+    }
+  ]
+}

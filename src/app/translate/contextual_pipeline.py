@@ -19,6 +19,7 @@ from app.project.models import (
 from .models import TranslationPromptTemplate
 from .openai_engine import OpenAITranslationEngine
 from .presets import resolve_prompt_family
+from .relationship_memory import clone_allowed_alternates
 from .scene_chunker import SceneChunk, chunk_segments_into_scenes
 from .semantic_qc import analyze_segment_analyses
 
@@ -225,7 +226,7 @@ def _serialize_relationship_rows(rows: list[object]) -> list[dict[str, object]]:
                     "relation_type": row.relation_type,
                     "default_self_term": row.default_self_term,
                     "default_address_term": row.default_address_term,
-                    "allowed_alternates": list(row.allowed_alternates_json),
+                    "allowed_alternates": clone_allowed_alternates(row.allowed_alternates_json),
                     "status": row.status,
                 }
             )
@@ -238,7 +239,7 @@ def _serialize_relationship_rows(rows: list[object]) -> list[dict[str, object]]:
                 "relation_type": row["relation_type"],
                 "default_self_term": row["default_self_term"],
                 "default_address_term": row["default_address_term"],
-                "allowed_alternates": json.loads(row["allowed_alternates_json"] or "[]"),
+                "allowed_alternates": clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
                 "status": row["status"],
             }
         )
@@ -309,7 +310,8 @@ def _relationship_defaults_map(database: ProjectDatabase, project_id: str) -> di
         defaults[(str(row["from_character_id"]), str(row["to_character_id"]))] = {
             "default_self_term": row["default_self_term"],
             "default_address_term": row["default_address_term"],
-            "allowed_alternates_json": json.loads(row["allowed_alternates_json"] or "[]"),
+            "allowed_alternates_json": clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
+            "status": row["status"] or "hypothesized",
         }
     return defaults
 
@@ -347,7 +349,7 @@ def _relationship_record_from_seed(project_id: str, seed, *, now: str, scene_id:
         intimacy_level=seed.intimacy_level,
         default_self_term=seed.default_self_term,
         default_address_term=seed.default_address_term,
-        allowed_alternates_json=list(seed.allowed_alternates),
+        allowed_alternates_json=clone_allowed_alternates(seed.allowed_alternates),
         scope=seed.scope,
         status=seed.status,
         evidence_segment_ids_json=list(seed.evidence_segment_ids),
@@ -595,7 +597,7 @@ def run_contextual_translation(
             intimacy_level=row["intimacy_level"],
             default_self_term=row["default_self_term"],
             default_address_term=row["default_address_term"],
-            allowed_alternates_json=json.loads(row["allowed_alternates_json"] or "[]"),
+            allowed_alternates_json=clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
             scope=row["scope"] or "scene",
             status=row["status"] or "hypothesized",
             evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),
@@ -791,7 +793,7 @@ def run_contextual_translation(
             (item.from_character_id, item.to_character_id): {
                 "default_self_term": item.default_self_term,
                 "default_address_term": item.default_address_term,
-                "allowed_alternates_json": item.allowed_alternates_json,
+                "allowed_alternates_json": clone_allowed_alternates(item.allowed_alternates_json),
             }
             for item in relationship_profiles.values()
         }

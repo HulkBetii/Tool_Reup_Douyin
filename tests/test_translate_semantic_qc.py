@@ -1,6 +1,19 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from app.translate.semantic_qc import analyze_segment_analyses
+
+
+def _load_regression_fixture(name: str) -> dict[str, object]:
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "regression" / name
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def _load_golden_fixture(name: str) -> dict[str, object]:
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "golden" / name
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
 def test_semantic_qc_flags_honorific_drift_and_pronoun_divergence() -> None:
@@ -62,3 +75,77 @@ def test_semantic_qc_flags_low_confidence_gate() -> None:
     codes = {issue.code for issue in report.issues}
     assert "low_confidence_gate" in codes
     assert "addressee_mismatch" in codes
+
+
+def test_semantic_qc_escalates_tts_only_pronoun_injection_under_ambiguous_listener() -> None:
+    fixture = _load_regression_fixture("zh-vi-tts-pronoun-injection-ambiguous-listener.json")
+
+    report = analyze_segment_analyses(fixture["segments"])
+
+    by_code = {}
+    for issue in report.issues:
+        by_code.setdefault(issue.code, set()).add(issue.severity)
+
+    assert "sub_tts_pronoun_divergence" in by_code
+    assert "addressee_mismatch" in by_code
+    assert "pronoun_without_evidence" in by_code
+    assert "error" in by_code["sub_tts_pronoun_divergence"]
+    assert report.error_count >= 1
+
+
+def test_semantic_qc_blocks_directionality_mismatch_against_locked_relation_memory() -> None:
+    fixture = _load_regression_fixture("zh-vi-locked-relation-directionality-mismatch.json")
+    relationship_defaults = {
+        ("char_a", "char_b"): dict(fixture["relationship_defaults"]["char_a->char_b"])
+    }
+
+    report = analyze_segment_analyses(fixture["segments"], relationship_defaults=relationship_defaults)
+
+    by_code = {}
+    for issue in report.issues:
+        by_code.setdefault(issue.code, set()).add(issue.severity)
+
+    assert "directionality_mismatch" in by_code
+    assert "error" in by_code["directionality_mismatch"]
+
+
+def test_semantic_qc_allows_whitelisted_alternates_under_locked_relation() -> None:
+    fixture = _load_golden_fixture("zh-vi-locked-relation-allowed-alternates-safe.json")
+    relationship_defaults = {
+        ("char_a", "char_b"): dict(fixture["relationship_defaults"]["char_a->char_b"])
+    }
+
+    report = analyze_segment_analyses(fixture["segments"], relationship_defaults=relationship_defaults)
+
+    codes = {issue.code for issue in report.issues}
+    assert "directionality_mismatch" not in codes
+    assert report.error_count == 0
+
+
+def test_semantic_qc_allows_self_only_alternate_without_relaxing_full_relation() -> None:
+    fixture = _load_regression_fixture("zh-vi-side-specific-alternates-self-safe.json")
+    relationship_defaults = {
+        ("char_a", "char_b"): dict(fixture["relationship_defaults"]["char_a->char_b"])
+    }
+
+    report = analyze_segment_analyses(fixture["segments"], relationship_defaults=relationship_defaults)
+
+    codes = {issue.code for issue in report.issues}
+    assert "directionality_mismatch" not in codes
+    assert report.error_count == 0
+
+
+def test_semantic_qc_does_not_apply_address_only_alternate_to_self_side() -> None:
+    fixture = _load_golden_fixture("zh-vi-side-specific-alternates-address-does-not-relax-self.json")
+    relationship_defaults = {
+        ("char_a", "char_b"): dict(fixture["relationship_defaults"]["char_a->char_b"])
+    }
+
+    report = analyze_segment_analyses(fixture["segments"], relationship_defaults=relationship_defaults)
+
+    by_code = {}
+    for issue in report.issues:
+        by_code.setdefault(issue.code, set()).add(issue.severity)
+
+    assert "directionality_mismatch" in by_code
+    assert "error" in by_code["directionality_mismatch"]

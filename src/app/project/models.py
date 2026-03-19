@@ -157,7 +157,7 @@ class RelationshipProfileRecord:
     intimacy_level: str | None = None
     default_self_term: str | None = None
     default_address_term: str | None = None
-    allowed_alternates_json: list[str] = field(default_factory=list)
+    allowed_alternates_json: list[str] | dict[str, list[str]] = field(default_factory=list)
     scope: str = "scene"
     status: str = "hypothesized"
     evidence_segment_ids_json: list[str] = field(default_factory=list)

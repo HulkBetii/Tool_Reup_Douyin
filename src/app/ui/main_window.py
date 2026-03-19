@@ -58,7 +58,6 @@ from app.project.database import (
 from app.project.models import (
     ProjectInitRequest,
     ProjectWorkspace,
-    RelationshipProfileRecord,
     SubtitleTrackRecord,
 )
 from app.project.runtime_state import restore_pipeline_state
@@ -78,6 +77,7 @@ from app.subtitle.qc import SubtitleQcConfig, SubtitleQcIssue, SubtitleQcReport,
 from app.tts.base import build_tts_stage_hash
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import load_synthesized_segments, synthesize_segments
+from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 from app.tts.presets import (
     batch_import_voice_clone_presets,
     delete_voice_preset,
@@ -3609,21 +3609,32 @@ class MainWindow(QMainWindow):
                     )
                     == selected_pair
                 ]
+                existing_relationship_row = next(
+                    (
+                        row
+                        for row in database.list_relationship_profiles(self._current_workspace.project_id)
+                        if str(row["from_character_id"]) == speaker_id and str(row["to_character_id"]) == listener_id
+                    ),
+                    None,
+                )
                 database.upsert_relationship_profiles(
                     [
-                        RelationshipProfileRecord(
-                            relationship_id=relationship_id,
+                        build_locked_relationship_record(
+                            existing=(
+                                relationship_record_from_row(
+                                    existing_relationship_row,
+                                    project_id=self._current_workspace.project_id,
+                                )
+                                if existing_relationship_row is not None
+                                else None
+                            ),
                             project_id=self._current_workspace.project_id,
-                            from_character_id=speaker_id,
-                            to_character_id=listener_id,
-                            relation_type="manual_locked",
-                            default_self_term=self_term or None,
-                            default_address_term=address_term or None,
-                            allowed_alternates_json=[],
-                            scope="global",
-                            status="locked_by_human",
-                            created_at=utc_now_iso(),
-                            updated_at=utc_now_iso(),
+                            relationship_id=relationship_id,
+                            speaker_id=speaker_id,
+                            listener_id=listener_id,
+                            self_term=self_term,
+                            address_term=address_term,
+                            now=utc_now_iso(),
                         )
                     ]
                 )

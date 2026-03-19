@@ -1,0 +1,48 @@
+{
+  "fixture_id": "ui-review-lock-preserves-allowed-alternates",
+  "class": "review_lock_preserves_relationship_memory",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "ui_review",
+  "notes": "Khi reviewer khoa quan he o UI, allowed_alternates hien co khong duoc bi reset ve rong.",
+  "existing_relationship": {
+    "relationship_id": "rel:char_a->char_b",
+    "from_character_id": "char_a",
+    "to_character_id": "char_b",
+    "relation_type": "siblings",
+    "power_delta": "peer",
+    "age_delta": "older_to_younger",
+    "intimacy_level": "casual",
+    "default_self_term": "anh",
+    "default_address_term": "em",
+    "allowed_alternates_json": {
+      "self_terms": [
+        "tao"
+      ],
+      "address_terms": [
+        "mày"
+      ]
+    },
+    "scope": "global",
+    "status": "confirmed",
+    "evidence_segment_ids_json": [
+      "seg-10",
+      "seg-12"
+    ],
+    "last_updated_scene_id": "scene_0003",
+    "notes": "Reviewer da cho phep doi sang tao/may o canh cai nhau.",
+    "created_at": "2026-03-20T00:00:00+00:00",
+    "updated_at": "2026-03-20T00:05:00+00:00"
+  },
+  "lock_input": {
+    "project_id": "project-1",
+    "relationship_id": "rel:char_a->char_b",
+    "speaker_id": "char_a",
+    "listener_id": "char_b",
+    "self_term": "anh",
+    "address_term": "em",
+    "now": "2026-03-20T00:10:00+00:00"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "fixture_id": "zh-vi-tts-pronoun-injection-ambiguous-listener",
+  "class": "unsafe_pronoun_injection_under_ambiguous_listener",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "TTS tu them xung ho khi listener va ellipsis evidence con yeu; subtitle giu cau trung tinh.",
+  "segments": [
+    {
+      "segment_id": "seg-0024",
+      "segment_index": 24,
+      "scene_id": "scene_0007",
+      "source_text": "\u8d70\u5427\uff0c\u522b\u8ba9\u5e08\u7236\u7b49\u6025\u4e86\u3002",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.82
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.43
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "anh",
+        "address_term": "em",
+        "confidence": 0.71
+      },
+      "confidence_json": {
+        "overall": 0.74,
+        "speaker": 0.82,
+        "listener": 0.43,
+        "relation": 0.71
+      },
+      "resolved_ellipsis_json": {
+        "omitted_subject": "speaker",
+        "omitted_object": "listener",
+        "confidence": 0.44
+      },
+      "risk_flags_json": [
+        "listener_ambiguous"
+      ],
+      "approved_subtitle_text": "Di thoi, dung de su phu cho lau.",
+      "approved_tts_text": "Di thoi em, dung de su phu cho lau."
+    }
+  ]
+}
