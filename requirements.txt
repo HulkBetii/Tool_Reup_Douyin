@@ -1,0 +1,8 @@
+PySide6>=6.8,<7
+pydantic>=2.9,<3
+httpx>=0.27,<1
+pysubs2>=1.7,<2
+python-mpv>=1.0,<2
+openai>=1.68,<2
+faster-whisper>=1.1,<2
+
