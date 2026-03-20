@@ -1,0 +1,55 @@
+{
+  "fixture_id": "zh-vi-unclear-relationship-pre-review-failsafe",
+  "class": "pre_review_unclear_relationship_fail_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Case thật từ Video_test_TQ trước review. Quan hệ speaker/listener chưa rõ thì line phải tiếp tục bị giữ ở review queue cho tới khi con người khóa policy.",
+  "segments": [
+    {
+      "segment_id": "seg-unclear-rel-0001",
+      "segment_index": 5,
+      "scene_id": "scene_uncertain_0001",
+      "source_text": "那我再给你一个机会",
+      "speaker_json": {
+        "character_id": "unknown_speaker",
+        "confidence": 0.9
+      },
+      "listeners_json": [
+        {
+          "character_id": "unknown_listener",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "locked": false,
+        "confidence": 0.8
+      },
+      "confidence_json": {
+        "overall": 0.85,
+        "speaker": 0.9,
+        "listener": 0.9,
+        "register": 0.85,
+        "relation": 0.7,
+        "translation": 0.9
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.75
+      },
+      "risk_flags_json": [],
+      "review_reason_codes_json": [
+        "uncertain_speaker",
+        "unclear_relationship"
+      ],
+      "review_question": "Are the speaker and listener identities and relationship clear enough to assign pronouns and honorifics?",
+      "approved_subtitle_text": "Thế thì tôi cho bạn thêm một cơ hội nữa",
+      "approved_tts_text": "Này nhé, tôi sẽ cho bạn thêm một cơ hội nữa đấy!"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "fixture_id": "zh-vi-uncertain-speaker-pre-review-failsafe",
+  "class": "pre_review_uncertain_speaker_fail_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Case thật từ Video_test_TQ trước review. Người nói chưa chắc thì line phải ở lại review queue, không được tự coi là an toàn chỉ vì semantic QC rule-based chưa có error.",
+  "segments": [
+    {
+      "segment_id": "seg-uncertain-speaker-0001",
+      "segment_index": 20,
+      "scene_id": "scene_uncertain_0000",
+      "source_text": "这么简单你都猜不出来啊",
+      "speaker_json": {
+        "character_id": "unknown_speaker",
+        "confidence": 0.9
+      },
+      "listeners_json": [
+        {
+          "character_id": "unknown_listener",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "locked": false,
+        "confidence": 0.8
+      },
+      "confidence_json": {
+        "overall": 0.85,
+        "speaker": 0.9,
+        "listener": 0.9,
+        "register": 0.85,
+        "relation": 0.7,
+        "translation": 0.9
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.75
+      },
+      "risk_flags_json": [],
+      "review_reason_codes_json": [
+        "uncertain_speaker",
+        "unknown_relationships"
+      ],
+      "review_question": "Are the speaker and listener identities and relationships correctly identified for appropriate pronoun and honorific usage?",
+      "approved_subtitle_text": "Đơn giản vậy mà bạn vẫn không đoán ra à?",
+      "approved_tts_text": "Đơn giản thế này mà bạn lại không đoán được sao?"
+    }
+  ]
+}

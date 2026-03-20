@@ -19,6 +19,28 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-uncertain-speaker-pre-review-failsafe",
+      "class": "pre_review_uncertain_speaker_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-uncertain-speaker-pre-review-failsafe.json",
+      "notes": "Case trước review với uncertain speaker. Intended behavior là giữ review queue và block downstream cho tới khi speaker được chốt."
+    },
+    {
+      "fixture_id": "zh-vi-unclear-relationship-pre-review-failsafe",
+      "class": "pre_review_unclear_relationship_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-unclear-relationship-pre-review-failsafe.json",
+      "notes": "Case trước review với unclear relationship. Intended behavior là giữ review queue cho tới khi policy quan hệ được làm rõ."
+    },
+    {
       "fixture_id": "zh-vi-ambiguous-term-pre-review-failsafe",
       "class": "pre_review_ambiguous_term_fail_safe",
       "languages": [
