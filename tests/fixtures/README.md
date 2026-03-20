@@ -16,3 +16,4 @@ Use this tree for committed non-binary fixtures that support regression-oriented
 - Register new fixtures in `manifest.json`.
 - If the source sample is sensitive, anonymize it.
 - If a semantic case has a stable intended outcome, add it to `golden/semantic_dataset_manifest.json` so the dataset harness runs it automatically.
+- If the stable contract is about review routing rather than QC counters, add it to `golden/review_gate_dataset_manifest.json`.

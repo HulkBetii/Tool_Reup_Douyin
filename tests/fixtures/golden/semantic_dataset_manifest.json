@@ -1,9 +1,12 @@
 {
-  "version": 1,
-  "description": "Stable semantic QC reference cases. Each entry declares the expected QC outcome so refactors can be checked against intentional behavior.",
+  "version": 2,
+  "description": "Stable semantic QC reference cases. Each entry declares both the expected QC counters and the intended routing outcome so refactors can be checked against intentional behavior.",
   "cases": [
     {
       "fixture_id": "zh-vi-real-reviewed-object-reference-safe",
+      "source_run": "contextual-v2-shinchan-120s-20260320",
+      "class": "reviewed_object_reference_safe",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-real-reviewed-object-reference-safe.json",
       "expected": {
         "error_count": 0,
@@ -19,6 +22,9 @@
     },
     {
       "fixture_id": "zh-vi-real-wilderness-narration-safe",
+      "source_run": "contextual-v2-wilderness-full-20260320",
+      "class": "reviewed_narration_safe",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-real-wilderness-narration-safe.json",
       "expected": {
         "error_count": 0,
@@ -34,6 +40,9 @@
     },
     {
       "fixture_id": "zh-vi-real-cartoon-dialogue-safe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "reviewed_dialogue_safe",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-real-cartoon-dialogue-safe.json",
       "expected": {
         "error_count": 0,
@@ -48,6 +57,9 @@
     },
     {
       "fixture_id": "zh-vi-real-cartoon-pronoun-divergence-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "sub_tts_pronoun_divergence",
+      "expected_outcome": "blocked",
       "path": "tests/fixtures/golden/zh-vi-real-cartoon-pronoun-divergence-failsafe.json",
       "expected": {
         "error_count": 1,
@@ -60,6 +72,9 @@
     },
     {
       "fixture_id": "zh-vi-real-single-word-low-confidence-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "low_confidence_gate",
+      "expected_outcome": "blocked",
       "path": "tests/fixtures/golden/zh-vi-real-single-word-low-confidence-failsafe.json",
       "expected": {
         "error_count": 1,
@@ -74,6 +89,9 @@
     },
     {
       "fixture_id": "zh-vi-family-elder-sibling-consistent-safe",
+      "source_run": "manual-contract",
+      "class": "consistent_honorific_policy",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-family-elder-sibling-consistent-safe.json",
       "expected": {
         "error_count": 0,
@@ -89,6 +107,9 @@
     },
     {
       "fixture_id": "zh-vi-narration-neutral-safe",
+      "source_run": "manual-contract",
+      "class": "neutral_narration_safe",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-narration-neutral-safe.json",
       "expected": {
         "error_count": 0,
@@ -104,6 +125,9 @@
     },
     {
       "fixture_id": "zh-vi-locked-relation-allowed-alternates-safe",
+      "source_run": "manual-contract",
+      "class": "locked_relation_allowed_alternates_safe",
+      "expected_outcome": "safe",
       "path": "tests/fixtures/golden/zh-vi-locked-relation-allowed-alternates-safe.json",
       "expected": {
         "error_count": 0,
@@ -116,6 +140,9 @@
     },
     {
       "fixture_id": "zh-vi-side-specific-alternates-address-does-not-relax-self",
+      "source_run": "manual-contract",
+      "class": "side_specific_alternates_contract",
+      "expected_outcome": "blocked",
       "path": "tests/fixtures/golden/zh-vi-side-specific-alternates-address-does-not-relax-self.json",
       "expected": {
         "error_count": 1,

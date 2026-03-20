@@ -11,6 +11,7 @@ from app.project.models import (
     JobRunRecord,
     MediaAssetRecord,
     ProjectRecord,
+    RegisterVoiceStylePolicyRecord,
     RelationshipProfileRecord,
     SceneMemoryRecord,
     SegmentRecord,
@@ -21,7 +22,7 @@ from app.project.models import (
     VoicePolicyRecord,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 CANONICAL_SUBTITLE_TRACK_KIND = "canonical"
 USER_SUBTITLE_TRACK_KIND = "user"
 
@@ -293,6 +294,35 @@ CREATE TABLE IF NOT EXISTS voice_policies (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_policies_unique
 ON voice_policies(project_id, policy_scope, speaker_character_id, listener_character_id);
 CREATE INDEX IF NOT EXISTS idx_voice_policies_project_id ON voice_policies(project_id);
+
+CREATE TABLE IF NOT EXISTS register_voice_style_policies (
+    policy_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    politeness TEXT NOT NULL DEFAULT '',
+    power_direction TEXT NOT NULL DEFAULT '',
+    emotional_tone TEXT NOT NULL DEFAULT '',
+    turn_function TEXT NOT NULL DEFAULT '',
+    relation_type TEXT NOT NULL DEFAULT '',
+    speed_override REAL,
+    volume_override REAL,
+    pitch_override REAL,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_register_voice_style_policies_unique
+ON register_voice_style_policies(
+    project_id,
+    politeness,
+    power_direction,
+    emotional_tone,
+    turn_function,
+    relation_type
+);
+CREATE INDEX IF NOT EXISTS idx_register_voice_style_policies_project_id
+ON register_voice_style_policies(project_id);
 """
 
 
@@ -669,6 +699,63 @@ class ProjectDatabase:
                 FROM voice_policies
                 WHERE project_id = ?
                 ORDER BY policy_scope ASC, speaker_character_id ASC, listener_character_id ASC
+                """,
+                (project_id,),
+            ).fetchall()
+
+    def replace_register_voice_style_policies(
+        self,
+        project_id: str,
+        policies: list[RegisterVoiceStylePolicyRecord],
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                "DELETE FROM register_voice_style_policies WHERE project_id = ?",
+                (project_id,),
+            )
+            if policies:
+                connection.executemany(
+                    """
+                    INSERT INTO register_voice_style_policies(
+                        policy_id, project_id, politeness, power_direction, emotional_tone,
+                        turn_function, relation_type, speed_override, volume_override,
+                        pitch_override, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            policy.policy_id,
+                            policy.project_id,
+                            policy.politeness or "",
+                            policy.power_direction or "",
+                            policy.emotional_tone or "",
+                            policy.turn_function or "",
+                            policy.relation_type or "",
+                            policy.speed_override,
+                            policy.volume_override,
+                            policy.pitch_override,
+                            policy.notes,
+                            policy.created_at,
+                            policy.updated_at,
+                        )
+                        for policy in policies
+                    ],
+                )
+
+    def list_register_voice_style_policies(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM register_voice_style_policies
+                WHERE project_id = ?
+                ORDER BY
+                    politeness ASC,
+                    power_direction ASC,
+                    emotional_tone ASC,
+                    turn_function ASC,
+                    relation_type ASC
                 """,
                 (project_id,),
             ).fetchall()

@@ -39,6 +39,9 @@ def _relationship_defaults_from_fixture(fixture: dict[str, object]) -> dict[tupl
 def test_golden_semantic_dataset_cases(case: dict[str, object]) -> None:
     fixture = _load_fixture(str(case["path"]))
     expected = dict(case["expected"])
+    assert str(case["expected_outcome"]) in {"safe", "blocked"}
+    assert str(case["class"]).strip()
+    assert str(case["source_run"]).strip()
 
     report = analyze_segment_analyses(
         fixture["segments"],
@@ -48,6 +51,10 @@ def test_golden_semantic_dataset_cases(case: dict[str, object]) -> None:
     codes = {issue.code for issue in report.issues}
     assert report.error_count == int(expected["error_count"])
     assert report.warning_count == int(expected["warning_count"])
+    if case["expected_outcome"] == "safe":
+        assert report.error_count == 0
+    else:
+        assert report.error_count >= 1
     for code in expected.get("required_codes", []):
         assert code in codes
     for code in expected.get("forbidden_codes", []):
@@ -66,3 +73,6 @@ def test_golden_semantic_dataset_manifest_points_to_existing_files() -> None:
         assert fixture_id == str(case["fixture_id"])
         assert fixture_id not in fixture_ids
         fixture_ids.add(fixture_id)
+        assert str(case["class"]).strip()
+        assert str(case["source_run"]).strip()
+        assert str(case["expected_outcome"]) in {"safe", "blocked"}

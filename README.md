@@ -138,9 +138,12 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
 - manual speaker -> voice preset binding theo project
 - voice policy theo nhan vat/quan he tren nen speaker binding
 - voice style/prosody policy theo nhan vat/quan he (`speed/volume/pitch`) tren nen voice policy
+- register-aware voice style policy theo `register/tone/turn-function/relation_type`
+- effective voice plan preview + `Rerun downstream only` tren tab `Long tieng`
 - regression harness cho semantic bugs:
   - fixture manifest
   - regression/golden fixtures
+  - review-gate dataset manifest
   - error taxonomy
   - review reason codes
   - AI bugfix workflow docs
@@ -161,5 +164,5 @@ Huong tiep theo hop ly:
 
 - mo rong golden semantic dataset tu cac bug that da gap
 - them regression test truc tiep cho cac helper/script downstream quan trong
-- polish review UI / bulk actions cho semantic va voice policy
-- xac dinh contract cho `voice style` theo register/role thay vi chi map theo character/relationship
+- polish tiep review/TTS UX cho cac case project dai hon
+- can nhac voice casting / emotion modeling sau khi dataset thuc te day hon

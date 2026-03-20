@@ -201,6 +201,7 @@ Current precedence:
 Effective style precedence:
 - relationship voice policy `speed/volume/pitch`
 - character voice policy `speed/volume/pitch`
+- register-aware voice style policy (`register/tone/turn-function/relation_type`)
 - selected preset defaults
 
 Fail-safe contract:
@@ -208,6 +209,35 @@ Fail-safe contract:
 - unresolved recognized speaker still blocks when explicit speaker binding mode is active
 - unknown placeholder speakers do not trigger manual policy/binding requirements
 - style-only policies are valid; they may override `speed/volume/pitch` without changing preset
+
+### Register-aware voice style policy
+
+- persistence:
+  - [src/app/project/database.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\database.py)
+  - `register_voice_style_policies` table
+- resolver:
+  - [src/app/tts/speaker_binding.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\speaker_binding.py)
+- UI:
+  - [src/app/ui/main_window.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ui\main_window.py)
+- downstream script/runtime:
+  - [scripts/rerun_contextual_downstream.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\rerun_contextual_downstream.py)
+
+Current contract:
+- match keys:
+  - `politeness`
+  - `power_direction`
+  - `emotional_tone`
+  - `turn_function`
+  - `relation_type`
+- precedence:
+  - relationship style
+  - character style
+  - register-aware style
+  - preset defaults
+- safety:
+  - register-aware style never changes preset directly
+  - `needs_human_review=true` or weak speaker/relation evidence => skip register-aware style
+  - missing register style policy is safe and falls back to the higher layers above
 - changing effective per-segment style must invalidate TTS cache the same way changing preset does
 
 ## Current weak spots for regression-oriented development

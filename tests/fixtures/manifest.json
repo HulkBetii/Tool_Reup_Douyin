@@ -19,6 +19,39 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-register-voice-style-fallback",
+      "class": "register_voice_style_fallback",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-register-voice-style-fallback.json",
+      "notes": "Register-aware voice style co the override speed/volume/pitch theo register_json va turn_function ma khong can doi preset."
+    },
+    {
+      "fixture_id": "zh-vi-character-style-overrides-register",
+      "class": "character_style_overrides_register_style",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-character-style-overrides-register.json",
+      "notes": "Character voice style van uu tien hon register-aware style tren cac field trung nhau, nhung register style co the giu cac field con lai."
+    },
+    {
+      "fixture_id": "zh-vi-register-voice-style-needs-review-skip",
+      "class": "register_voice_style_fail_safe_under_review",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-register-voice-style-needs-review-skip.json",
+      "notes": "Register-aware voice style khong duoc ap khi segment van needs_human_review hoac co risk flag uncertainty lien quan speaker/relation."
+    },
+    {
       "fixture_id": "zh-vi-character-voice-style-fallback",
       "class": "character_voice_style_fallback",
       "languages": [

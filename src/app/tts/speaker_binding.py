@@ -79,6 +79,17 @@ class RelationshipVoicePolicyCandidate:
 
 
 @dataclass(slots=True)
+class RegisterVoiceStyleCandidate:
+    label: str
+    segment_count: int
+    politeness: str = ""
+    power_direction: str = ""
+    emotional_tone: str = ""
+    turn_function: str = ""
+    relation_type: str = ""
+
+
+@dataclass(slots=True)
 class VoicePolicyValue:
     voice_preset_id: str = ""
     speed_override: float | None = None
@@ -97,6 +108,7 @@ class VoicePolicyValue:
 class SpeakerBindingPlan:
     active_bindings: bool
     active_voice_policies: bool = False
+    active_register_voice_styles: bool = False
     segment_voice_preset_ids: dict[str, str] = field(default_factory=dict)
     segment_voice_style_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
     segment_speaker_keys: dict[str, str] = field(default_factory=dict)
@@ -106,8 +118,10 @@ class SpeakerBindingPlan:
     relationship_policy_hits: int = 0
     character_style_hits: int = 0
     relationship_style_hits: int = 0
+    register_style_hits: int = 0
     segment_voice_sources: dict[str, str] = field(default_factory=dict)
     segment_voice_style_sources: dict[str, str] = field(default_factory=dict)
+    segment_voice_style_source_details: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def discover_speaker_candidates(
@@ -178,6 +192,74 @@ def discover_relationship_voice_policy_candidates(
     return candidates
 
 
+def _normalize_policy_token(value: object | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _relationship_type_map(relationship_rows: list[object] | None) -> dict[tuple[str, str], str]:
+    mapped: dict[tuple[str, str], str] = {}
+    for row in relationship_rows or []:
+        speaker_key = _normalize_speaker_key(_row_value(row, "from_character_id"))
+        listener_key = _normalize_speaker_key(_row_value(row, "to_character_id"))
+        if not speaker_key or not listener_key:
+            continue
+        relation_type = _normalize_policy_token(_row_value(row, "relation_type"))
+        if relation_type:
+            mapped[(speaker_key, listener_key)] = relation_type
+    return mapped
+
+
+def discover_register_voice_style_candidates(
+    analysis_rows: list[object],
+    *,
+    relationship_rows: list[object] | None = None,
+) -> list[RegisterVoiceStyleCandidate]:
+    relationship_types = _relationship_type_map(relationship_rows)
+    counts: Counter[tuple[str, str, str, str, str]] = Counter()
+    for row in analysis_rows:
+        register_json = _json_field(row, "register_json", {})
+        if not isinstance(register_json, dict):
+            register_json = {}
+        speaker_json = _json_field(row, "speaker_json", {})
+        speaker_key = _normalize_speaker_key(
+            speaker_json.get("character_id") if isinstance(speaker_json, dict) else None
+        )
+        listener_key = _primary_listener_key(row)
+        signature = (
+            _normalize_policy_token(register_json.get("politeness")),
+            _normalize_policy_token(register_json.get("power_direction")),
+            _normalize_policy_token(register_json.get("emotional_tone")),
+            _normalize_policy_token(_row_value(row, "turn_function")),
+            relationship_types.get((speaker_key, listener_key), "") if speaker_key and listener_key else "",
+        )
+        if not any(signature):
+            continue
+        counts[signature] += 1
+
+    candidates: list[RegisterVoiceStyleCandidate] = []
+    for signature, segment_count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        politeness, power_direction, emotional_tone, turn_function, relation_type = signature
+        label_parts = [
+            f"lich_su={politeness}" if politeness else "",
+            f"quyen_luc={power_direction}" if power_direction else "",
+            f"cam_xuc={emotional_tone}" if emotional_tone else "",
+            f"chuc_nang={turn_function}" if turn_function else "",
+            f"quan_he={relation_type}" if relation_type else "",
+        ]
+        candidates.append(
+            RegisterVoiceStyleCandidate(
+                label=", ".join(part for part in label_parts if part),
+                segment_count=segment_count,
+                politeness=politeness,
+                power_direction=power_direction,
+                emotional_tone=emotional_tone,
+                turn_function=turn_function,
+                relation_type=relation_type,
+            )
+        )
+    return candidates
+
+
 def _voice_policy_maps(
     voice_policy_rows: list[object] | None,
 ) -> tuple[dict[str, VoicePolicyValue], dict[tuple[str, str], VoicePolicyValue]]:
@@ -205,6 +287,31 @@ def _voice_policy_maps(
     return character_policy_map, relationship_policy_map
 
 
+def _register_style_policy_rows(
+    register_style_policy_rows: list[object] | None,
+) -> list[tuple[dict[str, str], VoicePolicyValue, str]]:
+    policies: list[tuple[dict[str, str], VoicePolicyValue, str]] = []
+    for row in register_style_policy_rows or []:
+        value = VoicePolicyValue(
+            speed_override=_normalize_optional_float(_row_value(row, "speed_override")),
+            volume_override=_normalize_optional_float(_row_value(row, "volume_override")),
+            pitch_override=_normalize_optional_float(_row_value(row, "pitch_override")),
+        )
+        if not value.has_style_override():
+            continue
+        match_payload = {
+            "politeness": _normalize_policy_token(_row_value(row, "politeness")),
+            "power_direction": _normalize_policy_token(_row_value(row, "power_direction")),
+            "emotional_tone": _normalize_policy_token(_row_value(row, "emotional_tone")),
+            "turn_function": _normalize_policy_token(_row_value(row, "turn_function")),
+            "relation_type": _normalize_policy_token(_row_value(row, "relation_type")),
+        }
+        if not any(match_payload.values()):
+            continue
+        policies.append((match_payload, value, str(_row_value(row, "policy_id", "") or "").strip()))
+    return policies
+
+
 def _normalize_optional_float(value: object | None) -> float | None:
     if value in (None, ""):
         return None
@@ -214,34 +321,129 @@ def _normalize_optional_float(value: object | None) -> float | None:
         return None
 
 
+def _register_style_context(
+    analysis_row: object,
+    *,
+    relation_type: str,
+) -> dict[str, str]:
+    register_json = _json_field(analysis_row, "register_json", {})
+    if not isinstance(register_json, dict):
+        register_json = {}
+    return {
+        "politeness": _normalize_policy_token(register_json.get("politeness")),
+        "power_direction": _normalize_policy_token(register_json.get("power_direction")),
+        "emotional_tone": _normalize_policy_token(register_json.get("emotional_tone")),
+        "turn_function": _normalize_policy_token(_row_value(analysis_row, "turn_function")),
+        "relation_type": _normalize_policy_token(relation_type),
+    }
+
+
+def _register_style_safe_to_apply(
+    analysis_row: object,
+    *,
+    requires_relation_signal: bool,
+) -> bool:
+    if bool(_row_value(analysis_row, "needs_human_review", False)):
+        return False
+    risk_flags = {
+        _normalize_policy_token(item)
+        for item in _json_field(analysis_row, "risk_flags_json", [])
+        if str(item or "").strip()
+    }
+    review_reason_codes = {
+        _normalize_policy_token(item)
+        for item in _json_field(analysis_row, "review_reason_codes_json", [])
+        if str(item or "").strip()
+    }
+    if {"uncertain_speaker", "unclear_relationship"} & (risk_flags | review_reason_codes):
+        return False
+    confidence_json = _json_field(analysis_row, "confidence_json", {})
+    if isinstance(confidence_json, dict):
+        speaker_confidence = _normalize_optional_float(confidence_json.get("speaker"))
+        relation_confidence = _normalize_optional_float(confidence_json.get("relation"))
+        if speaker_confidence is not None and speaker_confidence < 0.65:
+            return False
+        if requires_relation_signal and relation_confidence is not None and relation_confidence < 0.65:
+            return False
+    return True
+
+
+def _select_register_style_policy(
+    analysis_row: object,
+    *,
+    relation_type: str,
+    register_style_policies: list[tuple[dict[str, str], VoicePolicyValue, str]],
+) -> VoicePolicyValue | None:
+    if not register_style_policies:
+        return None
+    context = _register_style_context(analysis_row, relation_type=relation_type)
+    matched_policy: VoicePolicyValue | None = None
+    matched_specificity = -1
+    matched_policy_id = ""
+    for match_payload, value, policy_id in register_style_policies:
+        if not all(not expected or context.get(field_name, "") == expected for field_name, expected in match_payload.items()):
+            continue
+        requires_relation_signal = bool(match_payload.get("relation_type") or match_payload.get("power_direction"))
+        if not _register_style_safe_to_apply(
+            analysis_row,
+            requires_relation_signal=requires_relation_signal,
+        ):
+            continue
+        specificity = sum(1 for expected in match_payload.values() if expected)
+        if specificity > matched_specificity or (
+            specificity == matched_specificity and policy_id < matched_policy_id
+        ):
+            matched_policy = value
+            matched_specificity = specificity
+            matched_policy_id = policy_id
+    return matched_policy
+
+
 def _merge_style_overrides(
     *,
+    register_policy: VoicePolicyValue | None,
     character_policy: VoicePolicyValue | None,
     relationship_policy: VoicePolicyValue | None,
-) -> tuple[dict[str, float], str | None]:
+) -> tuple[dict[str, float], str | None, dict[str, str]]:
     override: dict[str, float] = {}
+    source_details: dict[str, str] = {}
     source: str | None = None
+    if register_policy is not None:
+        if register_policy.speed_override is not None:
+            override["speed"] = register_policy.speed_override
+            source_details["speed"] = "register_policy"
+        if register_policy.volume_override is not None:
+            override["volume"] = register_policy.volume_override
+            source_details["volume"] = "register_policy"
+        if register_policy.pitch_override is not None:
+            override["pitch"] = register_policy.pitch_override
+            source_details["pitch"] = "register_policy"
     if character_policy is not None:
         if character_policy.speed_override is not None:
             override["speed"] = character_policy.speed_override
-            source = "character_policy"
+            source_details["speed"] = "character_policy"
         if character_policy.volume_override is not None:
             override["volume"] = character_policy.volume_override
-            source = "character_policy"
+            source_details["volume"] = "character_policy"
         if character_policy.pitch_override is not None:
             override["pitch"] = character_policy.pitch_override
-            source = "character_policy"
+            source_details["pitch"] = "character_policy"
     if relationship_policy is not None:
         if relationship_policy.speed_override is not None:
             override["speed"] = relationship_policy.speed_override
-            source = "relationship_policy"
+            source_details["speed"] = "relationship_policy"
         if relationship_policy.volume_override is not None:
             override["volume"] = relationship_policy.volume_override
-            source = "relationship_policy"
+            source_details["volume"] = "relationship_policy"
         if relationship_policy.pitch_override is not None:
             override["pitch"] = relationship_policy.pitch_override
-            source = "relationship_policy"
-    return override, source
+            source_details["pitch"] = "relationship_policy"
+    distinct_sources = [name for name in ("relationship_policy", "character_policy", "register_policy") if name in source_details.values()]
+    if len(distinct_sources) == 1:
+        source = distinct_sources[0]
+    elif distinct_sources:
+        source = "+".join(distinct_sources)
+    return override, source, source_details
 
 
 def build_speaker_binding_plan(
@@ -251,6 +453,8 @@ def build_speaker_binding_plan(
     binding_rows: list[object],
     available_preset_ids: set[str],
     voice_policy_rows: list[object] | None = None,
+    relationship_rows: list[object] | None = None,
+    register_style_policy_rows: list[object] | None = None,
 ) -> SpeakerBindingPlan:
     analysis_by_segment_id: dict[str, object] = {
         str(_row_value(row, "segment_id", "") or "").strip(): row
@@ -266,9 +470,12 @@ def build_speaker_binding_plan(
         binding_map[(speaker_type, speaker_key)] = voice_preset_id
 
     character_policy_map, relationship_policy_map = _voice_policy_maps(voice_policy_rows)
+    register_style_policies = _register_style_policy_rows(register_style_policy_rows)
+    relationship_types = _relationship_type_map(relationship_rows)
     plan = SpeakerBindingPlan(
         active_bindings=bool(binding_map),
         active_voice_policies=bool(character_policy_map or relationship_policy_map),
+        active_register_voice_styles=bool(register_style_policies),
     )
     unresolved_speakers: set[str] = set()
     missing_preset_ids: set[str] = set()
@@ -291,6 +498,12 @@ def build_speaker_binding_plan(
         character_policy = character_policy_map.get(speaker_key)
         listener_key = _primary_listener_key(analysis_row)
         relationship_policy = relationship_policy_map.get((speaker_key, listener_key)) if listener_key else None
+        relation_type = relationship_types.get((speaker_key, listener_key), "") if listener_key else ""
+        register_policy = _select_register_style_policy(
+            analysis_row,
+            relation_type=relation_type,
+            register_style_policies=register_style_policies,
+        )
 
         bound_preset_id = binding_map.get(("character", speaker_key))
         if bound_preset_id:
@@ -320,7 +533,8 @@ def build_speaker_binding_plan(
                 elif plan.active_bindings:
                     unresolved_speakers.add(speaker_key)
 
-        style_overrides, style_source = _merge_style_overrides(
+        style_overrides, style_source, style_source_details = _merge_style_overrides(
+            register_policy=register_policy,
             character_policy=character_policy,
             relationship_policy=relationship_policy,
         )
@@ -328,10 +542,14 @@ def build_speaker_binding_plan(
             plan.segment_voice_style_overrides[segment_id] = style_overrides
             if style_source:
                 plan.segment_voice_style_sources[segment_id] = style_source
-            if style_source == "relationship_policy":
+            if style_source_details:
+                plan.segment_voice_style_source_details[segment_id] = style_source_details
+            if "relationship_policy" in style_source_details.values():
                 plan.relationship_style_hits += 1
-            elif style_source == "character_policy":
+            if "character_policy" in style_source_details.values():
                 plan.character_style_hits += 1
+            if "register_policy" in style_source_details.values():
+                plan.register_style_hits += 1
 
     plan.unresolved_speakers = sorted(unresolved_speakers)
     plan.missing_preset_ids = sorted(missing_preset_ids)

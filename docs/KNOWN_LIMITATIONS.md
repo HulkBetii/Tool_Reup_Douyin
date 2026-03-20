@@ -7,9 +7,9 @@ This file tracks current limitations so future bugfixes do not confuse "not impl
 1. No automatic diarization / speaker clustering pipeline is wired end-to-end.
 2. Speaker -> voice preset binding va voice policy hien van la manual; chua co diarization auto hay speaker cluster -> character binding.
 3. Prompt templates are seeded from code into project-local preset files, not managed from a single repo prompt catalog directory.
-4. Golden semantic datasets da co khung/fixture commit, nhung do phu van mong so voi cac edge case thuc te.
+4. Golden semantic datasets da co semantic-QC manifest va review-gate manifest, nhung do phu van mong so voi cac edge case thuc te.
 5. Some real-world sample resolution/polish scripts live under [scripts](C:\Users\HulkBeoti\Documents\Reup_Video\scripts) and are useful for exploration, but they are not a substitute for fixture-driven regression tests.
-6. Voice policy theo quan he/nhan vat da co layer rieng cho preset resolution va `speed/volume/pitch` overrides, nhung chua map register/role -> speaking style policy o muc semantic.
+6. Register-aware voice style da co layer rieng cho `speed/volume/pitch`, nhung chua co emotion modeling sau hon, auto voice casting, hoac policy semantic tinh vi hon theo actor/persona.
 
 ## Important distinction
 
@@ -33,3 +33,8 @@ This file tracks current limitations so future bugfixes do not confuse "not impl
   - no matching policy is safe to fall back to the global preset
   - style-only policies are valid and must not be treated as unbound
   - relationship style overrides beat character style overrides field-by-field
+- Register-aware voice style should preserve four rules:
+  - it only affects `speed/volume/pitch`, not preset selection
+  - it sits below relationship/character style overrides
+  - `needs_human_review` or weak speaker/relation confidence skips register-aware style
+  - missing register style policy is a safe fallback, not a blocker

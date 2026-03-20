@@ -25,10 +25,20 @@ def _load_regression_fixture(name: str) -> dict[str, object]:
 
 
 class _FakeDatabase:
-    def __init__(self, *, analyses: list[object], bindings: list[object], voice_policies: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        analyses: list[object],
+        bindings: list[object],
+        voice_policies: list[object] | None = None,
+        relationship_rows: list[object] | None = None,
+        register_style_policies: list[object] | None = None,
+    ) -> None:
         self._analyses = analyses
         self._bindings = bindings
         self._voice_policies = voice_policies or []
+        self._relationship_rows = relationship_rows or []
+        self._register_style_policies = register_style_policies or []
 
     def list_segment_analyses(self, _project_id: str | None = None) -> list[object]:
         return list(self._analyses)
@@ -38,6 +48,12 @@ class _FakeDatabase:
 
     def list_voice_policies(self, _project_id: str | None = None) -> list[object]:
         return list(self._voice_policies)
+
+    def list_relationship_profiles(self, _project_id: str | None = None) -> list[object]:
+        return list(self._relationship_rows)
+
+    def list_register_voice_style_policies(self, _project_id: str | None = None) -> list[object]:
+        return list(self._register_style_policies)
 
 
 def _preset(voice_preset_id: str, **overrides) -> VoicePreset:
@@ -297,6 +313,43 @@ def test_rerun_contextual_downstream_keeps_binding_preset_but_uses_policy_prosod
     assert segment_voice_presets["evt-1"].voice_preset_id == "voice-bind"
     assert segment_voice_presets["evt-1"].speed == 0.93
     assert segment_voice_presets["evt-1"].pitch == 2.0
+
+
+def test_rerun_contextual_downstream_applies_register_voice_style_and_reports_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-register-voice-style-fallback.json")
+
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: [],
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+        relationship_rows=list(fixture["relationship_rows"]),
+        register_style_policies=list(fixture["register_style_policy_rows"]),
+    )
+
+    segment_voice_presets, _segment_speaker_keys, plan = module._resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=list(fixture["subtitle_rows"]),
+        default_preset=_preset("default-sapi", speed=1.0, volume=1.0, pitch=0.0),
+    )
+
+    assert plan.active_register_voice_styles is True
+    assert plan.register_style_hits == 1
+    assert segment_voice_presets is not None
+    assert segment_voice_presets["evt-1"].voice_preset_id == "default-sapi"
+    assert segment_voice_presets["evt-1"].speed == 0.88
+    assert segment_voice_presets["evt-1"].volume == 1.05
+    assert segment_voice_presets["evt-1"].pitch == -0.6
 
 
 def test_rerun_contextual_downstream_blocks_when_selected_voice_policy_preset_is_missing(

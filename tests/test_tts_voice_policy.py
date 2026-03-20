@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.tts.speaker_binding import (
     build_speaker_binding_plan,
+    discover_register_voice_style_candidates,
     discover_relationship_voice_policy_candidates,
     resolve_segment_voice_presets,
 )
@@ -134,7 +135,7 @@ def test_build_speaker_binding_plan_layers_relationship_style_over_character_def
     assert plan.segment_voice_style_overrides == {
         "evt-1": {"speed": 1.08, "volume": 1.1, "pitch": 1.2}
     }
-    assert plan.character_style_hits == 0
+    assert plan.character_style_hits == 1
     assert plan.relationship_style_hits == 1
 
 
@@ -154,8 +155,80 @@ def test_explicit_speaker_binding_keeps_preset_but_inherits_policy_prosody() -> 
     assert plan.segment_voice_style_overrides == {
         "evt-1": {"speed": 0.93, "pitch": 2.0}
     }
-    assert plan.character_style_hits == 0
+    assert plan.character_style_hits == 1
     assert plan.relationship_style_hits == 1
+
+
+def test_build_speaker_binding_plan_applies_register_voice_style_fallback() -> None:
+    fixture = _load_regression_fixture("zh-vi-register-voice-style-fallback.json")
+
+    plan = build_speaker_binding_plan(
+        subtitle_rows=list(fixture["subtitle_rows"]),
+        analysis_rows=list(fixture["analysis_rows"]),
+        binding_rows=list(fixture["binding_rows"]),
+        voice_policy_rows=list(fixture["voice_policy_rows"]),
+        relationship_rows=list(fixture["relationship_rows"]),
+        register_style_policy_rows=list(fixture["register_style_policy_rows"]),
+        available_preset_ids=set(fixture["available_preset_ids"]),
+    )
+
+    assert plan.active_register_voice_styles is True
+    assert plan.segment_voice_preset_ids == {}
+    assert plan.segment_voice_style_overrides == {
+        "evt-1": {"speed": 0.88, "volume": 1.05, "pitch": -0.6}
+    }
+    assert plan.segment_voice_style_sources == {"evt-1": "register_policy"}
+    assert plan.register_style_hits == 1
+    assert plan.character_style_hits == 0
+    assert plan.relationship_style_hits == 0
+
+
+def test_character_style_overrides_register_style_on_shared_fields() -> None:
+    fixture = _load_regression_fixture("zh-vi-character-style-overrides-register.json")
+
+    plan = build_speaker_binding_plan(
+        subtitle_rows=list(fixture["subtitle_rows"]),
+        analysis_rows=list(fixture["analysis_rows"]),
+        binding_rows=list(fixture["binding_rows"]),
+        voice_policy_rows=list(fixture["voice_policy_rows"]),
+        relationship_rows=list(fixture["relationship_rows"]),
+        register_style_policy_rows=list(fixture["register_style_policy_rows"]),
+        available_preset_ids=set(fixture["available_preset_ids"]),
+    )
+
+    assert plan.segment_voice_style_overrides == {
+        "evt-1": {"speed": 1.12, "volume": 1.05, "pitch": 0.4}
+    }
+    assert plan.segment_voice_style_sources == {"evt-1": "character_policy+register_policy"}
+    assert plan.segment_voice_style_source_details == {
+        "evt-1": {
+            "speed": "character_policy",
+            "volume": "register_policy",
+            "pitch": "character_policy",
+        }
+    }
+    assert plan.register_style_hits == 1
+    assert plan.character_style_hits == 1
+    assert plan.relationship_style_hits == 0
+
+
+def test_register_voice_style_is_skipped_when_segment_still_needs_review() -> None:
+    fixture = _load_regression_fixture("zh-vi-register-voice-style-needs-review-skip.json")
+
+    plan = build_speaker_binding_plan(
+        subtitle_rows=list(fixture["subtitle_rows"]),
+        analysis_rows=list(fixture["analysis_rows"]),
+        binding_rows=list(fixture["binding_rows"]),
+        voice_policy_rows=list(fixture["voice_policy_rows"]),
+        relationship_rows=list(fixture["relationship_rows"]),
+        register_style_policy_rows=list(fixture["register_style_policy_rows"]),
+        available_preset_ids=set(fixture["available_preset_ids"]),
+    )
+
+    assert plan.active_register_voice_styles is True
+    assert plan.segment_voice_style_overrides == {}
+    assert plan.segment_voice_style_sources == {}
+    assert plan.register_style_hits == 0
 
 
 def test_resolve_segment_voice_presets_layers_overrides_on_selected_base_preset() -> None:
@@ -206,6 +279,47 @@ def test_resolve_segment_voice_presets_layers_overrides_on_selected_base_preset(
     assert segment_voice_presets["evt-1"].speed == 1.08
     assert segment_voice_presets["evt-1"].volume == 1.1
     assert segment_voice_presets["evt-1"].pitch == 1.2
+
+
+def test_discover_register_voice_style_candidates_groups_real_register_signals() -> None:
+    candidates = discover_register_voice_style_candidates(
+        [
+            {
+                "segment_id": "seg-1",
+                "speaker_json": {"character_id": "char_a"},
+                "listeners_json": [{"character_id": "char_b"}],
+                "register_json": {
+                    "politeness": "formal",
+                    "power_direction": "down",
+                    "emotional_tone": "serious",
+                },
+                "turn_function": "command",
+            },
+            {
+                "segment_id": "seg-2",
+                "speaker_json": {"character_id": "char_a"},
+                "listeners_json": [{"character_id": "char_b"}],
+                "register_json": {
+                    "politeness": "formal",
+                    "power_direction": "down",
+                    "emotional_tone": "serious",
+                },
+                "turn_function": "command",
+            },
+        ],
+        relationship_rows=[
+            {
+                "relationship_id": "rel:char_a->char_b",
+                "from_character_id": "char_a",
+                "to_character_id": "char_b",
+                "relation_type": "teacher_student",
+            }
+        ],
+    )
+
+    assert [(item.politeness, item.turn_function, item.relation_type, item.segment_count) for item in candidates] == [
+        ("formal", "command", "teacher_student", 2)
+    ]
 
 
 def test_discover_relationship_voice_policy_candidates_uses_analysis_and_known_relations() -> None:

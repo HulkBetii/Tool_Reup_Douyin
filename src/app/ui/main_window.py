@@ -58,6 +58,7 @@ from app.project.database import (
 from app.project.models import (
     ProjectInitRequest,
     ProjectWorkspace,
+    RegisterVoiceStylePolicyRecord,
     SpeakerBindingRecord,
     SubtitleTrackRecord,
     VoicePolicyRecord,
@@ -80,7 +81,9 @@ from app.tts.base import build_tts_stage_hash
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import load_synthesized_segments, synthesize_segments
 from app.tts.speaker_binding import (
+    RegisterVoiceStyleCandidate,
     build_speaker_binding_plan,
+    discover_register_voice_style_candidates,
     discover_relationship_voice_policy_candidates,
     discover_speaker_candidates,
     resolve_segment_voice_presets,
@@ -120,6 +123,18 @@ VOICE_POLICY_SPEED_COLUMN = 3
 VOICE_POLICY_VOLUME_COLUMN = 4
 VOICE_POLICY_PITCH_COLUMN = 5
 VOICE_POLICY_STATUS_COLUMN = 6
+
+REGISTER_STYLE_LABEL_COLUMN = 0
+REGISTER_STYLE_COUNT_COLUMN = 1
+REGISTER_STYLE_POLITENESS_COLUMN = 2
+REGISTER_STYLE_POWER_COLUMN = 3
+REGISTER_STYLE_EMOTION_COLUMN = 4
+REGISTER_STYLE_TURN_COLUMN = 5
+REGISTER_STYLE_RELATION_COLUMN = 6
+REGISTER_STYLE_SPEED_COLUMN = 7
+REGISTER_STYLE_VOLUME_COLUMN = 8
+REGISTER_STYLE_PITCH_COLUMN = 9
+REGISTER_STYLE_STATUS_COLUMN = 10
 
 
 class MainWindow(QMainWindow):
@@ -638,6 +653,14 @@ class MainWindow(QMainWindow):
         self._voice_policy_hint = self._create_info_label(
             "Máº¹o: voice policy lÃ  fallback má»m. Quan há»‡ speaker->listener sáº½ Æ°u tiÃªn hÆ¡n policy theo nhÃ¢n váº­t, nhÆ°ng speaker binding váº«n lÃ  má»©c Æ°u tiÃªn cao nháº¥t."
         )
+        self._register_voice_style_status = self._create_info_label("Register style: chÆ°a cÃ³ dá»¯ liá»‡u")
+        self._register_voice_style_hint = self._create_info_label(
+            "Máº¹o: register-aware style chá»‰ tinh chá»‰nh speed/volume/pitch. Policy theo quan há»‡ vÃ  nhÃ¢n váº­t váº«n Æ°u tiÃªn hÆ¡n register style, vÃ  segment cÃ²n mÆ¡ há»“ sáº½ khÃ´ng Ä‘Æ°á»£c Ã¡p."
+        )
+        self._effective_voice_plan_preview = QPlainTextEdit()
+        self._effective_voice_plan_preview.setReadOnly(True)
+        self._effective_voice_plan_preview.setPlaceholderText("Effective voice plan của track hiện tại sẽ hiện ở đây.")
+        self._effective_voice_plan_preview.setFixedHeight(160)
         self._voice_notes_input = QPlainTextEdit()
         self._voice_notes_input.setPlaceholderText("Ghi chÃº preset hoáº·c ghi chÃº vá» cáº¥u hÃ¬nh clone")
         self._voice_notes_input.setFixedHeight(56)
@@ -703,6 +726,40 @@ class MainWindow(QMainWindow):
         relationship_policy_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         relationship_policy_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         relationship_policy_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self._register_voice_style_table = QTableWidget(0, 11)
+        self._register_voice_style_table.setHorizontalHeaderLabels(
+            [
+                "TÃ¬nh huá»‘ng register",
+                "Sá»‘ dÃ²ng",
+                "Lá»‹ch sá»±",
+                "Quyá»n lá»±c",
+                "Cáº£m xÃºc",
+                "Chá»©c nÄƒng",
+                "Quan há»‡",
+                "Tá»‘c Ä‘á»™",
+                "Ã‚m lÆ°á»£ng",
+                "Cao Ä‘á»™",
+                "Tráº¡ng thÃ¡i",
+            ]
+        )
+        self._register_voice_style_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._register_voice_style_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._register_voice_style_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self._register_voice_style_table.setAlternatingRowColors(True)
+        self._register_voice_style_table.verticalHeader().setVisible(False)
+        self._register_voice_style_table.setMinimumHeight(160)
+        register_policy_header = self._register_voice_style_table.horizontalHeader()
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_LABEL_COLUMN, QHeaderView.ResizeMode.Stretch)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_COUNT_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_POLITENESS_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_POWER_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_EMOTION_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_TURN_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_RELATION_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_SPEED_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_VOLUME_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_PITCH_COLUMN, QHeaderView.ResizeMode.ResizeToContents)
+        register_policy_header.setSectionResizeMode(REGISTER_STYLE_STATUS_COLUMN, QHeaderView.ResizeMode.Stretch)
 
         reload_voices_button = QPushButton("Náº¡p láº¡i preset")
         reload_voices_button.clicked.connect(self._reload_voice_presets)
@@ -760,6 +817,20 @@ class MainWindow(QMainWindow):
         self._clear_selected_voice_policies_button.clicked.connect(self._clear_selected_voice_policy_rows)
         self._clear_selected_voice_policy_styles_button = QPushButton("Xóa style dòng chọn")
         self._clear_selected_voice_policy_styles_button.clicked.connect(self._clear_selected_voice_policy_row_styles)
+        self._fill_register_voice_styles_button = QPushButton("Điền style register trống")
+        self._fill_register_voice_styles_button.clicked.connect(self._fill_unstyled_register_voice_rows_with_current_style)
+        self._clear_register_voice_styles_button = QPushButton("Xóa style register")
+        self._clear_register_voice_styles_button.clicked.connect(self._clear_register_voice_style_form_styles)
+        self._fill_selected_register_voice_styles_button = QPushButton("Điền style register dòng chọn")
+        self._fill_selected_register_voice_styles_button.clicked.connect(
+            self._fill_selected_register_voice_rows_with_current_style
+        )
+        self._clear_selected_register_voice_styles_button = QPushButton("Xóa style register dòng chọn")
+        self._clear_selected_register_voice_styles_button.clicked.connect(
+            self._clear_selected_register_voice_row_styles
+        )
+        self._rerun_downstream_only_button = QPushButton("Rerun downstream only")
+        self._rerun_downstream_only_button.clicked.connect(self._rerun_downstream_only)
         choose_bgm_button = QPushButton("Chá»n BGM")
         choose_bgm_button.clicked.connect(self._choose_bgm_file)
         mix_button = QPushButton("Trá»™n Ã¢m thanh")
@@ -819,9 +890,17 @@ class MainWindow(QMainWindow):
         voice_policy_actions_bottom.addWidget(self._fill_selected_voice_policy_styles_button)
         voice_policy_actions_bottom.addWidget(self._clear_selected_voice_policy_styles_button)
         voice_policy_actions_bottom.addStretch(1)
+        register_style_actions = QHBoxLayout()
+        register_style_actions.addWidget(self._fill_register_voice_styles_button)
+        register_style_actions.addWidget(self._clear_register_voice_styles_button)
+        register_style_actions.addWidget(self._fill_selected_register_voice_styles_button)
+        register_style_actions.addWidget(self._clear_selected_register_voice_styles_button)
+        register_style_actions.addWidget(self._rerun_downstream_only_button)
+        register_style_actions.addStretch(1)
         voice_policy_actions = QVBoxLayout()
         voice_policy_actions.addLayout(voice_policy_actions_top)
         voice_policy_actions.addLayout(voice_policy_actions_bottom)
+        voice_policy_actions.addLayout(register_style_actions)
         voice_policy_actions_container = QWidget()
         voice_policy_actions_container.setLayout(voice_policy_actions)
 
@@ -890,7 +969,11 @@ class MainWindow(QMainWindow):
         form.addRow("", self._voice_policy_hint)
         form.addRow("Policy theo nhÃ¢n váº­t", self._character_voice_policy_table)
         form.addRow("Policy theo quan há»‡", self._relationship_voice_policy_table)
+        form.addRow("Register style", self._register_voice_style_status)
+        form.addRow("", self._register_voice_style_hint)
+        form.addRow("Policy theo register", self._register_voice_style_table)
         form.addRow("", voice_policy_actions_container)
+        form.addRow("Effective voice plan", self._effective_voice_plan_preview)
         form.addRow("BGM tÃ¹y chá»n", bgm_container)
         form.addRow("Má»©c Ã¢m khi trá»™n", mix_container)
 
@@ -2851,9 +2934,11 @@ class MainWindow(QMainWindow):
         if self._speaker_binding_dirty and self._speaker_binding_table.rowCount() > 0:
             lines.append("- Speaker binding trÃªn form: cÃ³ thay Ä‘á»•i chÆ°a lÆ°u; hÃ£y báº¥m LÆ°u binding Ä‘á»ƒ Ã¡p dá»¥ng")
         if self._voice_policy_dirty and (
-            self._character_voice_policy_table.rowCount() > 0 or self._relationship_voice_policy_table.rowCount() > 0
+            self._character_voice_policy_table.rowCount() > 0
+            or self._relationship_voice_policy_table.rowCount() > 0
+            or self._register_voice_style_table.rowCount() > 0
         ):
-            lines.append("- Voice policy trÃªn form: cÃ³ thay Ä‘á»•i chÆ°a lÆ°u; hÃ£y báº¥m LÆ°u voice policy Ä‘á»ƒ Ã¡p dá»¥ng")
+            lines.append("- Voice policy/register style trên form: có thay đổi chưa lưu; hãy bấm Lưu voice policy để áp dụng")
         self._voice_summary.setText("\n".join(lines))
 
     def _handle_speaker_binding_selection_changed(self, row_index: int) -> None:
@@ -3200,6 +3285,130 @@ class MainWindow(QMainWindow):
             "pitch": float(preset.pitch),
         }
 
+    def _register_voice_style_override_input(
+        self,
+        row_index: int,
+        column: int,
+    ) -> QLineEdit | None:
+        widget = self._register_voice_style_table.cellWidget(row_index, column)
+        return widget if isinstance(widget, QLineEdit) else None
+
+    def _register_voice_style_override_payload(
+        self,
+        row_index: int,
+        *,
+        strict: bool,
+    ) -> dict[str, float]:
+        payload: dict[str, float] = {}
+        field_columns = {
+            "speed": (REGISTER_STYLE_SPEED_COLUMN, "Tốc độ register style", 0.1, 4.0),
+            "volume": (REGISTER_STYLE_VOLUME_COLUMN, "Âm lượng register style", 0.0, 4.0),
+            "pitch": (REGISTER_STYLE_PITCH_COLUMN, "Cao độ register style", -24.0, 24.0),
+        }
+        for field_name, (column, label, minimum, maximum) in field_columns.items():
+            input_widget = self._register_voice_style_override_input(row_index, column)
+            if input_widget is None:
+                continue
+            value = (
+                self._parse_optional_voice_policy_float_value(
+                    input_widget.text(),
+                    field_name=label,
+                    minimum=minimum,
+                    maximum=maximum,
+                )
+                if strict
+                else self._coerce_optional_float(input_widget.text())
+            )
+            if value is not None:
+                payload[field_name] = value
+        return payload
+
+    def _set_register_voice_style_row_status(
+        self,
+        row_index: int,
+        *,
+        status_text: str,
+        status_kind: str,
+    ) -> None:
+        status_item = self._register_voice_style_table.item(row_index, REGISTER_STYLE_STATUS_COLUMN)
+        if status_item is None:
+            status_item = QTableWidgetItem()
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._register_voice_style_table.setItem(row_index, REGISTER_STYLE_STATUS_COLUMN, status_item)
+        status_item.setText(status_text)
+        status_item.setData(Qt.ItemDataRole.UserRole, status_kind)
+        status_item.setBackground(self._speaker_binding_status_color(status_kind))
+
+    def _update_register_voice_style_row_status(self, row_index: int) -> None:
+        style_overrides = self._register_voice_style_override_payload(row_index, strict=False)
+        if not style_overrides:
+            self._set_register_voice_style_row_status(
+                row_index,
+                status_text="Chưa cấu hình style",
+                status_kind="unbound",
+            )
+            return
+        self._set_register_voice_style_row_status(
+            row_index,
+            status_text="Đã cấu hình register style",
+            status_kind="ok",
+        )
+
+    def _apply_register_voice_style_to_row(self, row_index: int, style_payload: dict[str, float]) -> bool:
+        changed = False
+        field_columns = {
+            "speed": REGISTER_STYLE_SPEED_COLUMN,
+            "volume": REGISTER_STYLE_VOLUME_COLUMN,
+            "pitch": REGISTER_STYLE_PITCH_COLUMN,
+        }
+        for field_name, column in field_columns.items():
+            input_widget = self._register_voice_style_override_input(row_index, column)
+            if input_widget is None or field_name not in style_payload:
+                continue
+            formatted_value = self._format_voice_policy_override_value(style_payload[field_name])
+            if input_widget.text().strip() != formatted_value:
+                input_widget.setText(formatted_value)
+                changed = True
+        return changed
+
+    def _clear_register_voice_style_row_style(self, row_index: int) -> bool:
+        changed = False
+        for column in (
+            REGISTER_STYLE_SPEED_COLUMN,
+            REGISTER_STYLE_VOLUME_COLUMN,
+            REGISTER_STYLE_PITCH_COLUMN,
+        ):
+            input_widget = self._register_voice_style_override_input(row_index, column)
+            if input_widget is not None and input_widget.text().strip():
+                input_widget.clear()
+                changed = True
+        return changed
+
+    def _refresh_register_voice_style_status_summary(self) -> None:
+        if not self._current_workspace:
+            self._register_voice_style_status.setText("Register style: chưa mở dự án")
+            return
+        total_rows = self._register_voice_style_table.rowCount()
+        if total_rows == 0:
+            self._register_voice_style_status.setText(
+                "Register style: chưa có tín hiệu register/tone/turn-function để cấu hình"
+            )
+            return
+        configured_count = 0
+        for row_index in range(total_rows):
+            status_item = self._register_voice_style_table.item(row_index, REGISTER_STYLE_STATUS_COLUMN)
+            status_kind = str(status_item.data(Qt.ItemDataRole.UserRole) or "") if status_item else ""
+            if status_kind == "ok":
+                configured_count += 1
+        if configured_count == 0:
+            self._register_voice_style_status.setText(
+                f"Register style: 0/{total_rows} hàng đang cấu hình; thiếu policy thì runtime giữ nguyên style hiện tại"
+            )
+            return
+        self._register_voice_style_status.setText(
+            f"Register style: {configured_count}/{total_rows} hàng đã cấu hình"
+        )
+
     def _apply_voice_policy_style_to_row(
         self,
         table: QTableWidget,
@@ -3341,16 +3550,19 @@ class MainWindow(QMainWindow):
                 self._voice_policy_status.setText(status_text.replace(marker, ""))
         if is_dirty:
             self._voice_policy_hint.setText(
-                "LÆ°u Ã½: voice policy trÃªn form Ä‘ang cÃ³ thay Ä‘á»•i chÆ°a lÆ°u. Runtime chá»‰ dÃ¹ng policy Ä‘Ã£ lÆ°u trong dá»± Ã¡n."
+                "Lưu ý: voice policy/register style trên form đang có thay đổi chưa lưu. Runtime chỉ dùng policy đã lưu trong dự án."
             )
         else:
             self._voice_policy_hint.setText(
-                "Máº¹o: voice policy lÃ  fallback má»m. Quan há»‡ speaker->listener sáº½ Æ°u tiÃªn hÆ¡n policy theo nhÃ¢n váº­t, nhÆ°ng speaker binding váº«n lÃ  má»©c Æ°u tiÃªn cao nháº¥t."
+                "Mẹo: voice policy là fallback mềm. Quan hệ speaker->listener ưu tiên hơn policy theo nhân vật; register style chỉ tinh chỉnh speed/volume/pitch và speaker binding vẫn là mức ưu tiên cao nhất."
             )
         self._sync_voice_summary_with_binding_form_state()
 
     def _handle_voice_policy_selection_changed(self, table: QTableWidget, row_index: int) -> None:
         if self._voice_policy_loading:
+            return
+        if table is self._register_voice_style_table:
+            self._handle_register_voice_style_selection_changed(row_index)
             return
         self._update_voice_policy_row_status(table, row_index)
         self._refresh_voice_policy_status_summary()
@@ -3518,12 +3730,87 @@ class MainWindow(QMainWindow):
         if changed:
             self._set_voice_policy_form_dirty(True)
 
+    def _handle_register_voice_style_selection_changed(self, row_index: int) -> None:
+        if self._voice_policy_loading:
+            return
+        self._update_register_voice_style_row_status(row_index)
+        self._refresh_register_voice_style_status_summary()
+        self._set_voice_policy_form_dirty(True)
+
+    def _fill_unstyled_register_voice_rows_with_current_style(self) -> None:
+        try:
+            style_payload = self._current_voice_policy_style_payload(strict=True)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Register style", str(exc))
+            return
+        changed = 0
+        for row_index in range(self._register_voice_style_table.rowCount()):
+            if self._register_voice_style_override_payload(row_index, strict=False):
+                continue
+            if self._apply_register_voice_style_to_row(row_index, style_payload):
+                changed += 1
+        self._refresh_register_voice_style_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã điền style hiện tại cho {changed} hàng register style còn trống")
+        else:
+            QMessageBox.information(self, "Register style", "Không có hàng register style trống nào để điền nhanh.")
+
+    def _fill_selected_register_voice_rows_with_current_style(self) -> None:
+        try:
+            style_payload = self._current_voice_policy_style_payload(strict=True)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Register style", str(exc))
+            return
+        selected_rows = self._selected_table_row_indexes(self._register_voice_style_table)
+        if not selected_rows:
+            QMessageBox.information(self, "Register style", "Hãy chọn ít nhất một hàng register style.")
+            return
+        changed = 0
+        for row_index in selected_rows:
+            if self._apply_register_voice_style_to_row(row_index, style_payload):
+                changed += 1
+        self._refresh_register_voice_style_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã điền style hiện tại cho {changed} hàng register style được chọn")
+        else:
+            QMessageBox.information(
+                self,
+                "Register style",
+                "Các hàng register style đã chọn đã có cùng giá trị style hoặc không thay đổi.",
+            )
+
+    def _clear_register_voice_style_form_styles(self) -> None:
+        changed = False
+        for row_index in range(self._register_voice_style_table.rowCount()):
+            if self._clear_register_voice_style_row_style(row_index):
+                changed = True
+        self._refresh_register_voice_style_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+
+    def _clear_selected_register_voice_row_styles(self) -> None:
+        selected_rows = self._selected_table_row_indexes(self._register_voice_style_table)
+        if not selected_rows:
+            QMessageBox.information(self, "Register style", "Hãy chọn ít nhất một hàng register style.")
+            return
+        changed = False
+        for row_index in selected_rows:
+            if self._clear_register_voice_style_row_style(row_index):
+                changed = True
+        self._refresh_register_voice_style_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+
     def _reload_voice_policies(self) -> None:
         self._voice_policy_loading = True
         self._character_voice_policy_table.setRowCount(0)
         self._relationship_voice_policy_table.setRowCount(0)
+        self._register_voice_style_table.setRowCount(0)
         if not self._current_workspace:
             self._voice_policy_status.setText("Voice policy: chÆ°a má»Ÿ dá»± Ã¡n")
+            self._register_voice_style_status.setText("Register style: chưa mở dự án")
             self._voice_policy_loading = False
             self._set_voice_policy_form_dirty(False)
             return
@@ -3531,6 +3818,7 @@ class MainWindow(QMainWindow):
         analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
         if not analysis_rows:
             self._voice_policy_status.setText("Voice policy: chÆ°a cÃ³ dá»¯ liá»‡u Contextual V2")
+            self._register_voice_style_status.setText("Register style: chưa có dữ liệu Contextual V2")
             self._voice_policy_loading = False
             self._set_voice_policy_form_dirty(False)
             return
@@ -3538,6 +3826,9 @@ class MainWindow(QMainWindow):
         character_name_map = self._character_name_map(database)
         relationship_rows = database.list_relationship_profiles(self._current_workspace.project_id)
         voice_policy_rows = database.list_voice_policies(self._current_workspace.project_id)
+        register_style_policy_rows = database.list_register_voice_style_policies(
+            self._current_workspace.project_id
+        )
         available_preset_ids = {preset.voice_preset_id for preset in self._voice_presets}
 
         character_policy_map = {
@@ -3555,6 +3846,16 @@ class MainWindow(QMainWindow):
             if str(row["policy_scope"] or "").strip() == "relationship"
             and str(row["speaker_character_id"] or "").strip()
             and str(row["listener_character_id"] or "").strip()
+        }
+        register_style_policy_map = {
+            (
+                str(row["politeness"] or "").strip().lower(),
+                str(row["power_direction"] or "").strip().lower(),
+                str(row["emotional_tone"] or "").strip().lower(),
+                str(row["turn_function"] or "").strip().lower(),
+                str(row["relation_type"] or "").strip().lower(),
+            ): row
+            for row in register_style_policy_rows
         }
 
         character_candidates = discover_speaker_candidates(analysis_rows, character_name_map=character_name_map)
@@ -3613,6 +3914,43 @@ class MainWindow(QMainWindow):
                 )[0]
             )
         relationship_candidates.sort(key=lambda item: (-item.segment_count, item.label))
+        register_candidates = discover_register_voice_style_candidates(
+            analysis_rows,
+            relationship_rows=relationship_rows,
+        )
+        known_register_signatures = {
+            (
+                candidate.politeness,
+                candidate.power_direction,
+                candidate.emotional_tone,
+                candidate.turn_function,
+                candidate.relation_type,
+            )
+            for candidate in register_candidates
+        }
+        for signature in sorted(register_style_policy_map):
+            if signature in known_register_signatures:
+                continue
+            politeness, power_direction, emotional_tone, turn_function, relation_type = signature
+            label_parts = [
+                f"lich_su={politeness}" if politeness else "",
+                f"quyen_luc={power_direction}" if power_direction else "",
+                f"cam_xuc={emotional_tone}" if emotional_tone else "",
+                f"chuc_nang={turn_function}" if turn_function else "",
+                f"quan_he={relation_type}" if relation_type else "",
+            ]
+            register_candidates.append(
+                RegisterVoiceStyleCandidate(
+                    label=", ".join(part for part in label_parts if part),
+                    segment_count=0,
+                    politeness=politeness,
+                    power_direction=power_direction,
+                    emotional_tone=emotional_tone,
+                    turn_function=turn_function,
+                    relation_type=relation_type,
+                )
+            )
+        register_candidates.sort(key=lambda item: (-item.segment_count, item.label))
 
         for row_index, candidate in enumerate(character_candidates):
             self._character_voice_policy_table.insertRow(row_index)
@@ -3770,8 +4108,83 @@ class MainWindow(QMainWindow):
                 available_preset_ids=available_preset_ids,
             )
 
+        for row_index, candidate in enumerate(register_candidates):
+            self._register_voice_style_table.insertRow(row_index)
+            signature = (
+                candidate.politeness,
+                candidate.power_direction,
+                candidate.emotional_tone,
+                candidate.turn_function,
+                candidate.relation_type,
+            )
+            item = QTableWidgetItem(candidate.label)
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                {
+                    "politeness": candidate.politeness,
+                    "power_direction": candidate.power_direction,
+                    "emotional_tone": candidate.emotional_tone,
+                    "turn_function": candidate.turn_function,
+                    "relation_type": candidate.relation_type,
+                },
+            )
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._register_voice_style_table.setItem(row_index, REGISTER_STYLE_LABEL_COLUMN, item)
+            count_item = QTableWidgetItem(str(candidate.segment_count))
+            count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._register_voice_style_table.setItem(row_index, REGISTER_STYLE_COUNT_COLUMN, count_item)
+            for column, value in (
+                (REGISTER_STYLE_POLITENESS_COLUMN, candidate.politeness),
+                (REGISTER_STYLE_POWER_COLUMN, candidate.power_direction),
+                (REGISTER_STYLE_EMOTION_COLUMN, candidate.emotional_tone),
+                (REGISTER_STYLE_TURN_COLUMN, candidate.turn_function),
+                (REGISTER_STYLE_RELATION_COLUMN, candidate.relation_type),
+            ):
+                detail_item = QTableWidgetItem(value or "-")
+                detail_item.setFlags(detail_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._register_voice_style_table.setItem(row_index, column, detail_item)
+            selected_register_row = register_style_policy_map.get(signature)
+            self._register_voice_style_table.setCellWidget(
+                row_index,
+                REGISTER_STYLE_SPEED_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._register_voice_style_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_register_row["speed_override"] if selected_register_row is not None else None
+                    ),
+                    placeholder="Giữ nguyên",
+                ),
+            )
+            self._register_voice_style_table.setCellWidget(
+                row_index,
+                REGISTER_STYLE_VOLUME_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._register_voice_style_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_register_row["volume_override"] if selected_register_row is not None else None
+                    ),
+                    placeholder="Giữ nguyên",
+                ),
+            )
+            self._register_voice_style_table.setCellWidget(
+                row_index,
+                REGISTER_STYLE_PITCH_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._register_voice_style_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_register_row["pitch_override"] if selected_register_row is not None else None
+                    ),
+                    placeholder="Giữ nguyên",
+                ),
+            )
+            self._update_register_voice_style_row_status(row_index)
+
         self._voice_policy_loading = False
         self._refresh_voice_policy_status_summary()
+        self._refresh_register_voice_style_status_summary()
         self._set_voice_policy_form_dirty(False)
 
     def _save_voice_policies(self) -> None:
@@ -3781,6 +4194,7 @@ class MainWindow(QMainWindow):
         database = ProjectDatabase(self._current_workspace.database_path)
         now = utc_now_iso()
         policies: list[VoicePolicyRecord] = []
+        register_style_policies: list[RegisterVoiceStylePolicyRecord] = []
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in range(table.rowCount()):
                 policy_item = table.item(row_index, 0)
@@ -3819,19 +4233,185 @@ class MainWindow(QMainWindow):
                         updated_at=now,
                     )
                 )
+        for row_index in range(self._register_voice_style_table.rowCount()):
+            policy_item = self._register_voice_style_table.item(row_index, REGISTER_STYLE_LABEL_COLUMN)
+            if policy_item is None:
+                continue
+            payload = policy_item.data(Qt.ItemDataRole.UserRole) or {}
+            try:
+                style_overrides = self._register_voice_style_override_payload(row_index, strict=True)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Register style", str(exc))
+                return
+            if not style_overrides:
+                continue
+            politeness = str(payload.get("politeness", "") or "").strip().lower()
+            power_direction = str(payload.get("power_direction", "") or "").strip().lower()
+            emotional_tone = str(payload.get("emotional_tone", "") or "").strip().lower()
+            turn_function = str(payload.get("turn_function", "") or "").strip().lower()
+            relation_type = str(payload.get("relation_type", "") or "").strip().lower()
+            policy_suffix = ":".join(
+                part if part else "_" for part in (
+                    politeness,
+                    power_direction,
+                    emotional_tone,
+                    turn_function,
+                    relation_type,
+                )
+            )
+            register_style_policies.append(
+                RegisterVoiceStylePolicyRecord(
+                    policy_id=f"registerstyle:{policy_suffix}",
+                    project_id=self._current_workspace.project_id,
+                    politeness=politeness or None,
+                    power_direction=power_direction or None,
+                    emotional_tone=emotional_tone or None,
+                    turn_function=turn_function or None,
+                    relation_type=relation_type or None,
+                    speed_override=style_overrides.get("speed"),
+                    volume_override=style_overrides.get("volume"),
+                    pitch_override=style_overrides.get("pitch"),
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
         database.replace_voice_policies(self._current_workspace.project_id, policies)
+        database.replace_register_voice_style_policies(
+            self._current_workspace.project_id,
+            register_style_policies,
+        )
         self._set_voice_policy_form_dirty(False)
         self._invalidate_subtitle_pipeline_outputs(clear_tts_audio=True)
         self._reload_voice_policies()
         self._refresh_workspace_views()
-        self._append_log_line(f"ÄÃ£ lÆ°u {len(policies)} voice policy")
+        self._append_log_line(
+            f"Đã lưu {len(policies)} voice policy và {len(register_style_policies)} register style policy"
+        )
         QMessageBox.information(
             self,
             "Voice policy",
             (
-                f"ÄÃ£ lÆ°u {len(policies)} voice policy.\n"
+                f"Đã lưu {len(policies)} voice policy và {len(register_style_policies)} register style policy.\n"
                 "- Náº¿u Ä‘Ã£ thay Ä‘á»•i policy giá»ng, hÃ£y cháº¡y láº¡i TTS rá»“i táº¡o láº¡i track giá»ng."
             ),
+        )
+
+    @staticmethod
+    def _voice_plan_block_lines(plan: object | None) -> list[str]:
+        if plan is None:
+            return []
+        lines: list[str] = []
+        unresolved_speakers = list(getattr(plan, "unresolved_speakers", []) or [])
+        missing_preset_ids = list(getattr(plan, "missing_preset_ids", []) or [])
+        if unresolved_speakers:
+            lines.append(f"Blocked because speaker chưa gán preset: {', '.join(unresolved_speakers)}")
+        if missing_preset_ids:
+            lines.append(f"Blocked because preset không còn tồn tại: {', '.join(missing_preset_ids)}")
+        return lines
+
+    def _refresh_effective_voice_plan_preview(
+        self,
+        *,
+        subtitle_rows: list[object],
+        require_localized: bool,
+        default_preset: object | None,
+        segment_voice_presets: dict[str, object] | None,
+        voice_plan: object | None,
+    ) -> None:
+        if not self._current_workspace:
+            self._effective_voice_plan_preview.setPlainText("Chưa mở dự án.")
+            return
+        if default_preset is None:
+            self._effective_voice_plan_preview.setPlainText("Chưa chọn preset giọng mặc định.")
+            return
+        voice_rows = [
+            row for row in subtitle_rows if self._tts_output_text(row, require_localized=require_localized)
+        ]
+        if not voice_rows:
+            self._effective_voice_plan_preview.setPlainText("Track hiện tại chưa có dòng đủ dữ liệu để chạy TTS.")
+            return
+        preset_source_counts: dict[str, int] = {}
+        style_source_counts: dict[str, int] = {}
+        preview_lines = [
+            "Effective voice plan:",
+            f"- Preset mặc định: {getattr(default_preset, 'name', '-')}",
+        ]
+        blocked_lines = self._voice_plan_block_lines(voice_plan)
+        preview_lines.extend(f"- {line}" for line in blocked_lines)
+        for row in voice_rows:
+            segment_id = str(row["segment_id"])
+            preset_source = (
+                str(getattr(voice_plan, "segment_voice_sources", {}).get(segment_id, "fallback"))
+                if voice_plan is not None
+                else "fallback"
+            )
+            style_source = (
+                str(getattr(voice_plan, "segment_voice_style_sources", {}).get(segment_id, "fallback"))
+                if voice_plan is not None
+                else "fallback"
+            )
+            preset_source_counts[preset_source] = preset_source_counts.get(preset_source, 0) + 1
+            style_source_counts[style_source] = style_source_counts.get(style_source, 0) + 1
+        preview_lines.append(
+            "- Nguồn preset: "
+            + ", ".join(f"{key}={value}" for key, value in sorted(preset_source_counts.items()))
+        )
+        preview_lines.append(
+            "- Nguồn style: "
+            + ", ".join(f"{key}={value}" for key, value in sorted(style_source_counts.items()))
+        )
+        preview_lines.append("- Mẫu dòng hiệu lực:")
+        for row in voice_rows[:8]:
+            segment_id = str(row["segment_id"])
+            effective_preset = (
+                segment_voice_presets.get(segment_id, default_preset)
+                if segment_voice_presets is not None
+                else default_preset
+            )
+            speaker_key = (
+                str(getattr(voice_plan, "segment_speaker_keys", {}).get(segment_id, "?"))
+                if voice_plan is not None
+                else "?"
+            )
+            preset_source = (
+                str(getattr(voice_plan, "segment_voice_sources", {}).get(segment_id, "fallback"))
+                if voice_plan is not None
+                else "fallback"
+            )
+            style_source = (
+                str(getattr(voice_plan, "segment_voice_style_sources", {}).get(segment_id, "fallback"))
+                if voice_plan is not None
+                else "fallback"
+            )
+            style_source_details = (
+                dict(getattr(voice_plan, "segment_voice_style_source_details", {}).get(segment_id, {}))
+                if voice_plan is not None
+                else {}
+            )
+            detail_suffix = ""
+            if style_source_details:
+                detail_suffix = (
+                    ", field_sources="
+                    + ",".join(
+                        f"{field_name}:{source_name}"
+                        for field_name, source_name in sorted(style_source_details.items())
+                    )
+                )
+            preview_lines.append(
+                "- "
+                + f"{segment_id} / {speaker_key}: preset={getattr(effective_preset, 'voice_preset_id', '-')}"
+                + f" [{preset_source}], style=({float(getattr(effective_preset, 'speed', 1.0)):.2f},"
+                + f" {float(getattr(effective_preset, 'volume', 1.0)):.2f},"
+                + f" {float(getattr(effective_preset, 'pitch', 0.0)):.2f})"
+                + f" [{style_source}]"
+                + detail_suffix
+            )
+        self._effective_voice_plan_preview.setPlainText("\n".join(preview_lines))
+
+    def _rerun_downstream_only(self) -> None:
+        self._start_workflow(
+            ["tts", "voice_track", "mixdown", "export_video"],
+            workflow_name="Rerun downstream only",
         )
 
     def _resolve_tts_voice_plan(
@@ -3862,6 +4442,16 @@ class MainWindow(QMainWindow):
         voice_policy_rows = (
             database.list_voice_policies(self._current_workspace.project_id) if self._current_workspace else []
         )
+        register_style_policy_rows = (
+            database.list_register_voice_style_policies(self._current_workspace.project_id)
+            if self._current_workspace
+            else []
+        )
+        relationship_rows = (
+            database.list_relationship_profiles(self._current_workspace.project_id)
+            if self._current_workspace
+            else []
+        )
         analysis_rows = (
             database.list_segment_analyses(self._current_workspace.project_id) if self._current_workspace else []
         )
@@ -3870,19 +4460,24 @@ class MainWindow(QMainWindow):
             analysis_rows=analysis_rows,
             binding_rows=binding_rows,
             voice_policy_rows=voice_policy_rows,
+            relationship_rows=relationship_rows,
+            register_style_policy_rows=register_style_policy_rows,
             available_preset_ids=set(available_presets),
         )
-        if not plan.active_bindings and not getattr(plan, "active_voice_policies", False):
+        if (
+            not plan.active_bindings
+            and not getattr(plan, "active_voice_policies", False)
+            and not getattr(plan, "active_register_voice_styles", False)
+        ):
             return default_preset, None, plan.segment_speaker_keys or None, plan
 
         if plan.missing_preset_ids or plan.unresolved_speakers:
             if warn_on_unresolved:
-                lines = ["Voice policy/binding hiá»‡n chÆ°a Ä‘áº§y Ä‘á»§, chÆ°a thá»ƒ cháº¡y TTS an toÃ n."]
-                if plan.unresolved_speakers:
-                    lines.append(f"- Speaker chÆ°a gÃ¡n preset: {', '.join(plan.unresolved_speakers)}")
-                if plan.missing_preset_ids:
-                    lines.append(f"- Preset khÃ´ng cÃ²n tá»“n táº¡i: {', '.join(plan.missing_preset_ids)}")
-                lines.append("- HÃ£y vÃ o tab Lá»“ng tiáº¿ng, hoÃ n táº¥t speaker binding/voice policy rá»“i thá»­ láº¡i.")
+                lines = ["Voice plan hiện chưa an toàn, chưa thể chạy TTS."]
+                lines.extend(f"- {line}" for line in self._voice_plan_block_lines(plan))
+                lines.append(
+                    "- Hãy vào tab Lồng tiếng, hoàn tất speaker binding/voice policy/register style rồi thử lại."
+                )
                 QMessageBox.warning(self, dialog_title, "\n".join(lines))
             return default_preset, None, plan.segment_speaker_keys or None, plan
 
@@ -6095,6 +6690,7 @@ class MainWindow(QMainWindow):
         segment_voice_presets: dict[str, object] | None = None
         speaker_binding_lines: list[str] = []
         voice_binding_ready = True
+        voice_plan = None
         if database and subtitle_rows:
             resolved_preset, segment_voice_presets, _segment_speaker_keys, voice_plan = self._resolve_tts_voice_plan(
                 database,
@@ -6105,46 +6701,56 @@ class MainWindow(QMainWindow):
             )
             if voice_plan is not None:
                 if getattr(voice_plan, "active_bindings", False):
-                    if getattr(voice_plan, "unresolved_speakers", None):
+                    blocked_lines = self._voice_plan_block_lines(voice_plan)
+                    if blocked_lines:
                         voice_binding_ready = False
-                        speaker_binding_lines.append(
-                            "- Speaker binding: chưa đủ, còn speaker chưa gán preset "
-                            + f"({', '.join(voice_plan.unresolved_speakers)})"
-                        )
-                    elif getattr(voice_plan, "missing_preset_ids", None):
-                        voice_binding_ready = False
-                        speaker_binding_lines.append(
-                            "- Speaker binding: có binding trỏ tới preset không còn tồn tại "
-                            + f"({', '.join(voice_plan.missing_preset_ids)})"
-                        )
+                        speaker_binding_lines.extend(f"- {line}" for line in blocked_lines)
                     else:
                         speaker_binding_lines.append(
-                            f"- Speaker binding: đã gán theo speaker cho {len(voice_plan.segment_voice_preset_ids)} dòng"
+                            f"- Speaker binding: đã gán theo speaker cho {len(getattr(voice_plan, 'segment_voice_preset_ids', {}))} dòng"
                         )
                 else:
                     speaker_binding_lines.append(
                         "- Speaker binding: chưa bật, toàn bộ sẽ dùng preset mặc định"
                     )
         if database and subtitle_rows and voice_plan is not None:
-            if getattr(voice_plan, "active_voice_policies", False):
+            if getattr(voice_plan, "active_voice_policies", False) or getattr(
+                voice_plan,
+                "active_register_voice_styles",
+                False,
+            ):
                 relationship_hits = int(getattr(voice_plan, "relationship_policy_hits", 0))
                 character_hits = int(getattr(voice_plan, "character_policy_hits", 0))
                 relationship_style_hits = int(getattr(voice_plan, "relationship_style_hits", 0))
                 character_style_hits = int(getattr(voice_plan, "character_style_hits", 0))
-                if relationship_hits or character_hits or relationship_style_hits or character_style_hits:
+                register_style_hits = int(getattr(voice_plan, "register_style_hits", 0))
+                if relationship_hits or character_hits:
                     speaker_binding_lines.append(
                         f"- Voice policy: relationship={relationship_hits} dòng, character={character_hits} dòng"
                     )
-                    if relationship_style_hits or character_style_hits:
-                        speaker_binding_lines.append(
-                            f"- Voice style: relationship={relationship_style_hits} dòng, character={character_style_hits} dòng"
-                        )
-                else:
+                if relationship_style_hits or character_style_hits or register_style_hits:
                     speaker_binding_lines.append(
-                        "- Voice policy: đã bật nhưng chưa khớp dòng nào; runtime sẽ rơi về speaker binding hoặc preset mặc định"
+                        f"- Voice style: relationship={relationship_style_hits} dòng, character={character_style_hits} dòng, register={register_style_hits} dòng"
+                    )
+                if not (
+                    relationship_hits
+                    or character_hits
+                    or relationship_style_hits
+                    or character_style_hits
+                    or register_style_hits
+                ):
+                    speaker_binding_lines.append(
+                        "- Voice policy/style: đã bật nhưng chưa khớp dòng nào; runtime sẽ rơi về speaker binding hoặc preset mặc định"
                     )
             else:
-                speaker_binding_lines.append("- Voice policy: chưa bật")
+                speaker_binding_lines.append("- Voice policy/style: chưa bật")
+        self._refresh_effective_voice_plan_preview(
+            subtitle_rows=subtitle_rows,
+            require_localized=require_localized,
+            default_preset=resolved_preset,
+            segment_voice_presets=segment_voice_presets,
+            voice_plan=voice_plan,
+        )
         tts_ready_count = sum(1 for row in subtitle_rows if row["audio_path"])
         total_duration_ms = int(video_row["duration_ms"]) if video_row and video_row["duration_ms"] else (
             max((int(row["end_ms"]) for row in subtitle_rows), default=0)
@@ -6190,7 +6796,7 @@ class MainWindow(QMainWindow):
             voice_lines.append("- VieNeu SDK: chÆ°a cÃ i")
         voice_lines.extend(speaker_binding_lines)
         if not voice_binding_ready:
-            voice_lines.append("- Tráº¡ng thÃ¡i binding: chÆ°a an toÃ n Ä‘á»ƒ cháº¡y TTS hoáº·c xuáº¥t video")
+            voice_lines.append("- Trạng thái voice plan: blocked, chưa an toàn để chạy TTS hoặc xuất video")
         if current_preset and current_preset.engine.lower() == "vieneu":
             try:
                 voice_lines.append(f"- Cháº¿ Ä‘á»™ VieNeu: {get_vieneu_mode(current_preset)}")

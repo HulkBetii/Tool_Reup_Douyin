@@ -196,6 +196,23 @@ class VoicePolicyRecord:
 
 
 @dataclass(slots=True)
+class RegisterVoiceStylePolicyRecord:
+    policy_id: str
+    project_id: str
+    politeness: str | None = None
+    power_direction: str | None = None
+    emotional_tone: str | None = None
+    turn_function: str | None = None
+    relation_type: str | None = None
+    speed_override: float | None = None
+    volume_override: float | None = None
+    pitch_override: float | None = None
+    notes: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(slots=True)
 class SceneMemoryRecord:
     scene_id: str
     project_id: str

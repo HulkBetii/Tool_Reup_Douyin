@@ -57,15 +57,23 @@ def _resolve_segment_voice_plan(
     available_presets[default_preset.voice_preset_id] = default_preset
     binding_rows = database.list_speaker_bindings(workspace.project_id)
     voice_policy_rows = database.list_voice_policies(workspace.project_id)
+    register_style_policy_rows = database.list_register_voice_style_policies(workspace.project_id)
+    relationship_rows = database.list_relationship_profiles(workspace.project_id)
     analysis_rows = database.list_segment_analyses(workspace.project_id)
     plan = build_speaker_binding_plan(
         subtitle_rows=segments,
         analysis_rows=analysis_rows,
         binding_rows=binding_rows,
         voice_policy_rows=voice_policy_rows,
+        relationship_rows=relationship_rows,
+        register_style_policy_rows=register_style_policy_rows,
         available_preset_ids=set(available_presets),
     )
-    if not plan.active_bindings and not plan.active_voice_policies:
+    if (
+        not plan.active_bindings
+        and not plan.active_voice_policies
+        and not getattr(plan, "active_register_voice_styles", False)
+    ):
         return None, plan.segment_speaker_keys or None, plan
     if plan.unresolved_speakers or plan.missing_preset_ids:
         lines = ["Voice plan hien chua day du, chua the rerun downstream an toan."]
@@ -213,6 +221,7 @@ def main() -> int:
         "relationship_policy_hits": int(getattr(voice_plan, "relationship_policy_hits", 0)),
         "character_style_hits": int(getattr(voice_plan, "character_style_hits", 0)),
         "relationship_style_hits": int(getattr(voice_plan, "relationship_style_hits", 0)),
+        "register_style_hits": int(getattr(voice_plan, "register_style_hits", 0)),
         "tts_manifest": str(synthesized.manifest_path),
         "voice_track_path": str(voice_track.voice_track_path),
         "mixed_audio_path": str(mixed_audio.mixed_audio_path),

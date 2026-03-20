@@ -1,0 +1,69 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "tts_text": "Duoc."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.78
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "confidence": 0.55,
+          "role": "primary"
+        }
+      ],
+      "register_json": {
+        "politeness": "formal",
+        "power_direction": "down",
+        "emotional_tone": "neutral"
+      },
+      "turn_function": "statement",
+      "confidence_json": {
+        "speaker": 0.62,
+        "relation": 0.59
+      },
+      "risk_flags_json": [
+        "uncertain_speaker"
+      ],
+      "needs_human_review": true,
+      "review_reason_codes_json": [
+        "uncertain_speaker"
+      ]
+    }
+  ],
+  "binding_rows": [],
+  "voice_policy_rows": [],
+  "relationship_rows": [
+    {
+      "relationship_id": "rel:char_a->char_b",
+      "from_character_id": "char_a",
+      "to_character_id": "char_b",
+      "relation_type": "teacher_student"
+    }
+  ],
+  "register_style_policy_rows": [
+    {
+      "policy_id": "registerstyle:formal-statement",
+      "project_id": "project-1",
+      "politeness": "formal",
+      "power_direction": "down",
+      "emotional_tone": "neutral",
+      "turn_function": "statement",
+      "relation_type": "",
+      "speed_override": 0.95,
+      "volume_override": 1.02,
+      "pitch_override": -0.2
+    }
+  ],
+  "available_preset_ids": [
+    "default-sapi"
+  ]
+}

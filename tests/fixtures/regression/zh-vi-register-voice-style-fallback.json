@@ -1,0 +1,63 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "tts_text": "Mau len."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.94
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "confidence": 0.91,
+          "role": "primary"
+        }
+      ],
+      "register_json": {
+        "politeness": "formal",
+        "power_direction": "down",
+        "emotional_tone": "serious"
+      },
+      "turn_function": "command",
+      "confidence_json": {
+        "speaker": 0.94,
+        "relation": 0.88
+      },
+      "needs_human_review": false
+    }
+  ],
+  "binding_rows": [],
+  "voice_policy_rows": [],
+  "relationship_rows": [
+    {
+      "relationship_id": "rel:char_a->char_b",
+      "from_character_id": "char_a",
+      "to_character_id": "char_b",
+      "relation_type": "teacher_student"
+    }
+  ],
+  "register_style_policy_rows": [
+    {
+      "policy_id": "registerstyle:formal-command",
+      "project_id": "project-1",
+      "politeness": "formal",
+      "power_direction": "down",
+      "emotional_tone": "",
+      "turn_function": "command",
+      "relation_type": "",
+      "speed_override": 0.88,
+      "volume_override": 1.05,
+      "pitch_override": -0.6
+    }
+  ],
+  "available_preset_ids": [
+    "default-sapi"
+  ]
+}

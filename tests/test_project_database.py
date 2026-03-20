@@ -7,6 +7,7 @@ from pathlib import Path
 from app.project.database import CANONICAL_SUBTITLE_TRACK_KIND, ProjectDatabase
 from app.project.models import (
     ProjectRecord,
+    RegisterVoiceStylePolicyRecord,
     RelationshipProfileRecord,
     SceneMemoryRecord,
     SegmentAnalysisRecord,
@@ -359,6 +360,58 @@ def test_project_database_replaces_and_lists_voice_policies(tmp_path: Path) -> N
     ]
 
 
+def test_project_database_replaces_and_lists_register_voice_style_policies(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-20T00:00:00+00:00",
+            updated_at="2026-03-20T00:00:00+00:00",
+        )
+    )
+
+    database.replace_register_voice_style_policies(
+        "project-1",
+        [
+            RegisterVoiceStylePolicyRecord(
+                policy_id="registerstyle:formal-command",
+                project_id="project-1",
+                politeness="formal",
+                power_direction="down",
+                emotional_tone="serious",
+                turn_function="command",
+                relation_type="teacher_student",
+                speed_override=0.88,
+                volume_override=1.05,
+                pitch_override=-0.6,
+                notes="narrator emphasis",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            )
+        ],
+    )
+
+    rows = database.list_register_voice_style_policies("project-1")
+
+    assert len(rows) == 1
+    assert rows[0]["politeness"] == "formal"
+    assert rows[0]["power_direction"] == "down"
+    assert rows[0]["emotional_tone"] == "serious"
+    assert rows[0]["turn_function"] == "command"
+    assert rows[0]["relation_type"] == "teacher_student"
+    assert rows[0]["speed_override"] == 0.88
+    assert rows[0]["volume_override"] == 1.05
+    assert rows[0]["pitch_override"] == -0.6
+    assert rows[0]["notes"] == "narrator emphasis"
+
+
 def test_initialize_migrates_existing_voice_policies_table_to_add_style_override_columns(tmp_path: Path) -> None:
     database_path = tmp_path / "legacy_voice_policy.db"
     connection = sqlite3.connect(database_path)
@@ -421,6 +474,85 @@ def test_initialize_migrates_existing_voice_policies_table_to_add_style_override
     assert rows[0]["speed_override"] is None
     assert rows[0]["volume_override"] is None
     assert rows[0]["pitch_override"] is None
+
+
+def test_initialize_adds_register_voice_style_policy_table_to_existing_voice_policy_db(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy_voice_policy.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO metadata(key, value) VALUES ('schema_version', '7');
+
+            CREATE TABLE projects (
+                project_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                root_dir TEXT NOT NULL,
+                source_language TEXT NOT NULL,
+                target_language TEXT NOT NULL,
+                translation_mode TEXT NOT NULL DEFAULT 'contextual_v2',
+                video_asset_id TEXT,
+                active_subtitle_track_id TEXT,
+                active_voice_preset_id TEXT,
+                active_export_preset_id TEXT,
+                active_watermark_profile_id TEXT,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE voice_policies (
+                policy_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                policy_scope TEXT NOT NULL,
+                speaker_character_id TEXT NOT NULL,
+                listener_character_id TEXT NOT NULL DEFAULT '',
+                voice_preset_id TEXT NOT NULL DEFAULT '',
+                speed_override REAL,
+                volume_override REAL,
+                pitch_override REAL,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    database = ProjectDatabase(database_path)
+    database.initialize()
+
+    with database.connect() as connection:
+        table_names = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(register_voice_style_policies)"
+            ).fetchall()
+        }
+
+    assert "register_voice_style_policies" in table_names
+    assert {
+        "politeness",
+        "power_direction",
+        "emotional_tone",
+        "turn_function",
+        "relation_type",
+        "speed_override",
+        "volume_override",
+        "pitch_override",
+    } <= columns
 
 
 def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:

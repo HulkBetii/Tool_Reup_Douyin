@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "description": "Stable review-gate routing cases. Each entry declares whether a semantic case must remain in review or become a hard block before downstream TTS/export.",
+  "cases": [
+    {
+      "fixture_id": "zh-vi-ambiguous-term-pre-review-failsafe",
+      "source_run": "contextual-v2-shinchan-120s-20260320",
+      "class": "ambiguous_term",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-ambiguous-term-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-ambiguous-object-reference-pre-review-failsafe",
+      "source_run": "contextual-v2-shinchan-120s-20260320",
+      "class": "ambiguous_object_reference",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-ambiguous-object-reference-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-uncertain-speaker-pre-review-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "uncertain_speaker",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-uncertain-speaker-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-unclear-relationship-pre-review-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "unclear_relationship",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-unclear-relationship-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-tone-ambiguity-pre-review-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "tone_ambiguity",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-tone-ambiguity-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-insufficient-context-pre-review-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "insufficient_context",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-insufficient-context-pre-review-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-tts-pronoun-injection-ambiguous-listener",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "sub_tts_pronoun_divergence",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-tts-pronoun-injection-ambiguous-listener.json"
+    },
+    {
+      "fixture_id": "zh-vi-locked-relation-directionality-mismatch",
+      "source_run": "manual-contract",
+      "class": "locked_relation_directionality_mismatch",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-locked-relation-directionality-mismatch.json"
+    },
+    {
+      "fixture_id": "zh-vi-real-cartoon-pronoun-divergence-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "sub_tts_pronoun_divergence",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/golden/zh-vi-real-cartoon-pronoun-divergence-failsafe.json"
+    },
+    {
+      "fixture_id": "zh-vi-real-single-word-low-confidence-failsafe",
+      "source_run": "contextual-v2-video-test-tq-120s-20260320",
+      "class": "low_confidence_gate",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/golden/zh-vi-real-single-word-low-confidence-failsafe.json"
+    }
+  ]
+}
