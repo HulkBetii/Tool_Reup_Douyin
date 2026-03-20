@@ -319,6 +319,8 @@ def test_project_database_replaces_and_lists_voice_policies(tmp_path: Path) -> N
                 policy_scope="character",
                 speaker_character_id="char_a",
                 voice_preset_id="voice-a",
+                speed_override=0.95,
+                volume_override=1.1,
                 notes="character default",
                 created_at="2026-03-20T00:00:00+00:00",
                 updated_at="2026-03-20T00:00:00+00:00",
@@ -330,6 +332,7 @@ def test_project_database_replaces_and_lists_voice_policies(tmp_path: Path) -> N
                 speaker_character_id="char_a",
                 listener_character_id="char_b",
                 voice_preset_id="voice-rel",
+                pitch_override=1.2,
                 notes="relation override",
                 created_at="2026-03-20T00:00:00+00:00",
                 updated_at="2026-03-20T00:00:00+00:00",
@@ -340,12 +343,84 @@ def test_project_database_replaces_and_lists_voice_policies(tmp_path: Path) -> N
     rows = database.list_voice_policies("project-1")
 
     assert [
-        (row["policy_scope"], row["speaker_character_id"], row["listener_character_id"], row["voice_preset_id"])
+        (
+            row["policy_scope"],
+            row["speaker_character_id"],
+            row["listener_character_id"],
+            row["voice_preset_id"],
+            row["speed_override"],
+            row["volume_override"],
+            row["pitch_override"],
+        )
         for row in rows
     ] == [
-        ("character", "char_a", "", "voice-a"),
-        ("relationship", "char_a", "char_b", "voice-rel"),
+        ("character", "char_a", "", "voice-a", 0.95, 1.1, None),
+        ("relationship", "char_a", "char_b", "voice-rel", None, None, 1.2),
     ]
+
+
+def test_initialize_migrates_existing_voice_policies_table_to_add_style_override_columns(tmp_path: Path) -> None:
+    database_path = tmp_path / "legacy_voice_policy.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO metadata(key, value) VALUES ('schema_version', '6');
+
+            CREATE TABLE voice_policies (
+                policy_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                policy_scope TEXT NOT NULL,
+                speaker_character_id TEXT NOT NULL,
+                listener_character_id TEXT NOT NULL DEFAULT '',
+                voice_preset_id TEXT NOT NULL DEFAULT '',
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            INSERT INTO voice_policies(
+                policy_id, project_id, policy_scope, speaker_character_id,
+                listener_character_id, voice_preset_id, notes, created_at, updated_at
+            )
+            VALUES (
+                'voicepolicy:character:char_a',
+                'project-1',
+                'character',
+                'char_a',
+                '',
+                'voice-a',
+                'legacy row',
+                '2026-03-20T00:00:00+00:00',
+                '2026-03-20T00:00:00+00:00'
+            );
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    database = ProjectDatabase(database_path)
+    database.initialize()
+
+    with database.connect() as connection:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(voice_policies)").fetchall()
+        }
+
+    assert {"speed_override", "volume_override", "pitch_override"} <= columns
+
+    rows = database.list_voice_policies("project-1")
+    assert len(rows) == 1
+    assert rows[0]["voice_preset_id"] == "voice-a"
+    assert rows[0]["speed_override"] is None
+    assert rows[0]["volume_override"] is None
+    assert rows[0]["pitch_override"] is None
 
 
 def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:

@@ -1,0 +1,41 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "tts_text": "Di thoi."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.96
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "confidence": 0.93
+        }
+      ]
+    }
+  ],
+  "binding_rows": [],
+  "voice_policy_rows": [
+    {
+      "policy_id": "voicepolicy:character:char_a",
+      "project_id": "project-1",
+      "policy_scope": "character",
+      "speaker_character_id": "char_a",
+      "listener_character_id": "",
+      "voice_preset_id": "",
+      "speed_override": 0.92,
+      "volume_override": 1.15,
+      "pitch_override": -1.5
+    }
+  ],
+  "available_preset_ids": [
+    "default-sapi"
+  ]
+}

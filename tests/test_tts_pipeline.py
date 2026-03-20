@@ -114,6 +114,42 @@ def test_build_tts_stage_hash_changes_when_segment_voice_assignments_change() ->
     assert hash_without_binding != hash_with_binding
 
 
+def test_build_tts_stage_hash_changes_when_segment_voice_style_changes() -> None:
+    preset = VoicePreset(
+        voice_preset_id="default-sapi",
+        name="Default",
+        engine="sapi",
+        sample_rate=22050,
+    )
+    alternate_preset = VoicePreset(
+        voice_preset_id="default-sapi",
+        name="Default",
+        engine="sapi",
+        sample_rate=22050,
+        speed=0.92,
+    )
+    segments = [
+        {
+            "segment_id": "seg-1",
+            "segment_index": 0,
+            "start_ms": 0,
+            "end_ms": 1000,
+            "tts_text": "Xin chao",
+            "subtitle_text": "Xin chao",
+            "translated_text": "Xin chao",
+        }
+    ]
+
+    base_hash = build_tts_stage_hash(segments, preset)
+    style_hash = build_tts_stage_hash(
+        segments,
+        preset,
+        segment_voice_presets={"seg-1": alternate_preset},
+    )
+
+    assert base_hash != style_hash
+
+
 def test_synthesize_segments_uses_segment_voice_presets(tmp_path: Path, monkeypatch) -> None:
     workspace = _workspace(tmp_path)
     default_preset = VoicePreset(

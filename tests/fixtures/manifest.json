@@ -19,6 +19,39 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-character-voice-style-fallback",
+      "class": "character_voice_style_fallback",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-character-voice-style-fallback.json",
+      "notes": "Character voice policy co the chi override speed/volume/pitch ma khong can doi preset; runtime phai layer style len preset mac dinh."
+    },
+    {
+      "fixture_id": "zh-vi-relationship-voice-style-overrides-character",
+      "class": "relationship_voice_style_override",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-relationship-voice-style-overrides-character.json",
+      "notes": "Quan he speaker->listener co the override tung field prosody tren nen character voice policy, dong thoi van co quyen doi preset neu can."
+    },
+    {
+      "fixture_id": "zh-vi-explicit-binding-keeps-preset-but-uses-policy-prosody",
+      "class": "speaker_binding_with_policy_prosody",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-explicit-binding-keeps-preset-but-uses-policy-prosody.json",
+      "notes": "Speaker binding van quyet dinh preset, nhung voice policy duoc phep bo sung prosody overrides theo character/relationship."
+    },
+    {
       "fixture_id": "zh-vi-tone-ambiguity-pre-review-failsafe",
       "class": "pre_review_tone_ambiguity_fail_safe",
       "languages": [

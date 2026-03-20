@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from app.tts.models import VoicePreset
 
 
 def _load_script_module():
@@ -39,8 +40,15 @@ class _FakeDatabase:
         return list(self._voice_policies)
 
 
-def _preset(voice_preset_id: str) -> SimpleNamespace:
-    return SimpleNamespace(voice_preset_id=voice_preset_id)
+def _preset(voice_preset_id: str, **overrides) -> VoicePreset:
+    payload = {
+        "voice_preset_id": voice_preset_id,
+        "name": voice_preset_id,
+        "engine": "sapi",
+        "sample_rate": 22050,
+    }
+    payload.update(overrides)
+    return VoicePreset(**payload)
 
 
 def test_rerun_contextual_downstream_blocks_partial_speaker_binding_config(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,6 +224,79 @@ def test_rerun_contextual_downstream_relationship_policy_overrides_character_def
     assert plan.relationship_policy_hits == 1
     assert segment_voice_presets is not None
     assert {key: value.voice_preset_id for key, value in segment_voice_presets.items()} == {"evt-1": "voice-rel"}
+
+
+def test_rerun_contextual_downstream_applies_style_only_character_voice_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-character-voice-style-fallback.json")
+
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: [],
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+    )
+
+    segment_voice_presets, segment_speaker_keys, plan = module._resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=list(fixture["subtitle_rows"]),
+        default_preset=_preset("default-sapi"),
+    )
+
+    assert plan.active_voice_policies is True
+    assert plan.character_style_hits == 1
+    assert segment_speaker_keys == {"evt-1": "char_a"}
+    assert segment_voice_presets is not None
+    assert segment_voice_presets["evt-1"].voice_preset_id == "default-sapi"
+    assert segment_voice_presets["evt-1"].speed == 0.92
+    assert segment_voice_presets["evt-1"].volume == 1.15
+    assert segment_voice_presets["evt-1"].pitch == -1.5
+
+
+def test_rerun_contextual_downstream_keeps_binding_preset_but_uses_policy_prosody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-explicit-binding-keeps-preset-but-uses-policy-prosody.json")
+
+    available_presets = {
+        "voice-bind": _preset("voice-bind", engine="vieneu", sample_rate=24000),
+    }
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: list(available_presets.values()),
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+    )
+
+    segment_voice_presets, _segment_speaker_keys, plan = module._resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=list(fixture["subtitle_rows"]),
+        default_preset=_preset("default-sapi"),
+    )
+
+    assert plan.active_bindings is True
+    assert plan.relationship_style_hits == 1
+    assert segment_voice_presets is not None
+    assert segment_voice_presets["evt-1"].voice_preset_id == "voice-bind"
+    assert segment_voice_presets["evt-1"].speed == 0.93
+    assert segment_voice_presets["evt-1"].pitch == 2.0
 
 
 def test_rerun_contextual_downstream_blocks_when_selected_voice_policy_preset_is_missing(

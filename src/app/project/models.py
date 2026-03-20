@@ -187,6 +187,9 @@ class VoicePolicyRecord:
     speaker_character_id: str
     listener_character_id: str | None = None
     voice_preset_id: str = ""
+    speed_override: float | None = None
+    volume_override: float | None = None
+    pitch_override: float | None = None
     notes: str = ""
     created_at: str = ""
     updated_at: str = ""

@@ -115,7 +115,7 @@ Important distinction:
 6. contextual outputs are applied back into canonical `segments`
 7. canonical outputs sync into canonical subtitle track
 8. user edits live in user subtitle tracks
-9. speaker binding / voice policy resolve per-segment `voice preset`
+9. speaker binding / voice policy resolve per-segment `voice preset` and optional style overrides
 10. TTS uses subtitle rows / `tts_text`
 11. voice track + mixdown produce audio artifacts
 12. export uses active subtitle track + optional mixed audio
@@ -198,10 +198,17 @@ Current precedence:
 - character voice policy
 - global preset
 
+Effective style precedence:
+- relationship voice policy `speed/volume/pitch`
+- character voice policy `speed/volume/pitch`
+- selected preset defaults
+
 Fail-safe contract:
 - missing preset inside the selected binding/policy source => block
 - unresolved recognized speaker still blocks when explicit speaker binding mode is active
 - unknown placeholder speakers do not trigger manual policy/binding requirements
+- style-only policies are valid; they may override `speed/volume/pitch` without changing preset
+- changing effective per-segment style must invalidate TTS cache the same way changing preset does
 
 ## Current weak spots for regression-oriented development
 

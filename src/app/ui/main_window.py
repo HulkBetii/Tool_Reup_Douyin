@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import re
@@ -83,6 +83,7 @@ from app.tts.speaker_binding import (
     build_speaker_binding_plan,
     discover_relationship_voice_policy_candidates,
     discover_speaker_candidates,
+    resolve_segment_voice_presets,
 )
 from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 from app.tts.presets import (
@@ -111,6 +112,14 @@ from app.translate.presets import ensure_prompt_templates, list_prompt_templates
 from app.translate.review_resolution import apply_review_resolution, resolve_review_target_segment_ids
 from app.ui.status_panel import StatusPanel
 from app.version import APP_NAME, APP_VERSION
+
+VOICE_POLICY_LABEL_COLUMN = 0
+VOICE_POLICY_COUNT_COLUMN = 1
+VOICE_POLICY_PRESET_COLUMN = 2
+VOICE_POLICY_SPEED_COLUMN = 3
+VOICE_POLICY_VOLUME_COLUMN = 4
+VOICE_POLICY_PITCH_COLUMN = 5
+VOICE_POLICY_STATUS_COLUMN = 6
 
 
 class MainWindow(QMainWindow):
@@ -169,13 +178,13 @@ class MainWindow(QMainWindow):
         self._settings_tab = self._build_settings_tab()
         self._logs_tab = self._build_logs_tab()
 
-        self._tabs.addTab(self._wrap_scrollable_tab(self._project_tab), "Dự án")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._translate_tab), "ASR & Dịch")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._subtitle_tab), "Phụ đề")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._voiceover_tab), "Lồng tiếng")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._export_tab), "Xuất bản")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._settings_tab), "Cài đặt")
-        self._tabs.addTab(self._wrap_scrollable_tab(self._logs_tab), "Nhật ký")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._project_tab), "Dá»± Ã¡n")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._translate_tab), "ASR & Dá»‹ch")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._subtitle_tab), "Phá»¥ Ä‘á»")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._voiceover_tab), "Lá»“ng tiáº¿ng")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._export_tab), "Xuáº¥t báº£n")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._settings_tab), "CÃ i Ä‘áº·t")
+        self._tabs.addTab(self._wrap_scrollable_tab(self._logs_tab), "Nháº­t kÃ½")
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._tabs)
@@ -189,22 +198,22 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(container)
 
         self._sync_settings_to_form()
-        self._append_log_line("Khởi tạo giao diện hoàn tất")
+        self._append_log_line("Khá»Ÿi táº¡o giao diá»‡n hoÃ n táº¥t")
 
     def _build_project_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        self._project_summary = self._create_info_label("Chưa mở dự án")
-        self._media_summary = self._create_info_label("Chưa có video nguồn")
-        self._pipeline_summary = self._create_info_label("Checklist quy trình chưa có dữ liệu")
-        self._workflow_status = self._create_info_label("Quy trình nhanh: sẵn sàng")
+        self._project_summary = self._create_info_label("ChÆ°a má»Ÿ dá»± Ã¡n")
+        self._media_summary = self._create_info_label("ChÆ°a cÃ³ video nguá»“n")
+        self._pipeline_summary = self._create_info_label("Checklist quy trÃ¬nh chÆ°a cÃ³ dá»¯ liá»‡u")
+        self._workflow_status = self._create_info_label("Quy trÃ¬nh nhanh: sáºµn sÃ ng")
 
-        group = QGroupBox("Khởi tạo / mở dự án")
+        group = QGroupBox("Khá»Ÿi táº¡o / má»Ÿ dá»± Ã¡n")
         form = QFormLayout(group)
         self._configure_form_layout(form)
 
-        self._project_name_input = QLineEdit("Dự án mới")
+        self._project_name_input = QLineEdit("Dá»± Ã¡n má»›i")
         self._project_root_input = QLineEdit(str(Path.cwd() / "workspace"))
         self._source_video_input = QLineEdit()
         self._source_lang_combo = QComboBox()
@@ -212,49 +221,49 @@ class MainWindow(QMainWindow):
         self._target_lang_combo = QComboBox()
         self._target_lang_combo.addItems(["vi", "zh", "en"])
 
-        browse_button = QPushButton("Chọn thư mục")
+        browse_button = QPushButton("Chá»n thÆ° má»¥c")
         browse_button.clicked.connect(self._choose_project_root)
-        create_button = QPushButton("Tạo dự án")
+        create_button = QPushButton("Táº¡o dá»± Ã¡n")
         create_button.clicked.connect(self._create_project)
-        open_button = QPushButton("Mở dự án")
+        open_button = QPushButton("Má»Ÿ dá»± Ã¡n")
         open_button.clicked.connect(self._open_project)
-        smoke_button = QPushButton("Chạy tác vụ thử")
+        smoke_button = QPushButton("Cháº¡y tÃ¡c vá»¥ thá»­")
         smoke_button.clicked.connect(self._run_smoke_job)
-        choose_video_button = QPushButton("Chọn video")
+        choose_video_button = QPushButton("Chá»n video")
         choose_video_button.clicked.connect(self._choose_source_video)
-        probe_button = QPushButton("Đọc metadata")
+        probe_button = QPushButton("Äá»c metadata")
         probe_button.clicked.connect(self._run_probe_media_job)
-        extract_button = QPushButton("Tách âm thanh")
+        extract_button = QPushButton("TÃ¡ch Ã¢m thanh")
         extract_button.clicked.connect(self._run_extract_audio_job)
-        prepare_media_button = QPushButton("Chuẩn bị media")
+        prepare_media_button = QPushButton("Chuáº©n bá»‹ media")
         prepare_media_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["probe_media", "extract_audio"],
-                workflow_name="Chuẩn bị media",
+                workflow_name="Chuáº©n bá»‹ media",
             )
         )
-        asr_translate_button = QPushButton("ASR -> Dịch")
+        asr_translate_button = QPushButton("ASR -> Dá»‹ch")
         asr_translate_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["asr", "translate"],
-                workflow_name="ASR -> Dịch",
+                workflow_name="ASR -> Dá»‹ch",
             )
         )
-        dub_button = QPushButton("Lồng tiếng nhanh")
+        dub_button = QPushButton("Lá»“ng tiáº¿ng nhanh")
         dub_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["tts", "voice_track", "mixdown"],
-                workflow_name="Lồng tiếng nhanh",
+                workflow_name="Lá»“ng tiáº¿ng nhanh",
             )
         )
-        full_pipeline_button = QPushButton("Chạy toàn bộ quy trình")
+        full_pipeline_button = QPushButton("Cháº¡y toÃ n bá»™ quy trÃ¬nh")
         full_pipeline_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["probe_media", "extract_audio", "asr", "translate", "tts", "voice_track", "mixdown", "export_video"],
-                workflow_name="Toàn bộ quy trình",
+                workflow_name="ToÃ n bá»™ quy trÃ¬nh",
             )
         )
-        stop_workflow_button = QPushButton("Dừng quy trình")
+        stop_workflow_button = QPushButton("Dá»«ng quy trÃ¬nh")
         stop_workflow_button.clicked.connect(self._stop_workflow)
 
         button_row = QHBoxLayout()
@@ -289,18 +298,18 @@ class MainWindow(QMainWindow):
         workflow_container = QWidget()
         workflow_container.setLayout(workflow_row)
 
-        workflow_group = QGroupBox("Quy trình nhanh")
+        workflow_group = QGroupBox("Quy trÃ¬nh nhanh")
         workflow_form = QFormLayout(workflow_group)
         self._configure_form_layout(workflow_form)
-        workflow_form.addRow("Trạng thái", self._workflow_status)
+        workflow_form.addRow("Tráº¡ng thÃ¡i", self._workflow_status)
         workflow_form.addRow("", workflow_container)
 
-        form.addRow("Tên dự án", self._project_name_input)
-        form.addRow("Thư mục dự án", self._project_root_input)
-        form.addRow("Video nguồn", self._source_video_input)
+        form.addRow("TÃªn dá»± Ã¡n", self._project_name_input)
+        form.addRow("ThÆ° má»¥c dá»± Ã¡n", self._project_root_input)
+        form.addRow("Video nguá»“n", self._source_video_input)
         form.addRow("", source_container)
-        form.addRow("Ngôn ngữ nguồn", self._source_lang_combo)
-        form.addRow("Dịch sang", self._target_lang_combo)
+        form.addRow("NgÃ´n ngá»¯ nguá»“n", self._source_lang_combo)
+        form.addRow("Dá»‹ch sang", self._target_lang_combo)
         form.addRow("", button_container)
 
         layout.addWidget(self._project_summary)
@@ -310,11 +319,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(workflow_group)
         layout.addWidget(
             self._build_placeholder_group(
-                "Hướng dẫn nhanh",
-                "1. Chọn video nguồn rồi tạo hoặc mở dự án.\n"
-                "2. Dùng “Chuẩn bị media” để đọc metadata và tách âm thanh.\n"
-                "3. Dùng “ASR -> Dịch” để nhận diện lời nói và tạo bản dịch.\n"
-                "4. Nếu cần lồng tiếng hoặc xuất video ngay, dùng các quy trình nhanh còn lại.",
+                "HÆ°á»›ng dáº«n nhanh",
+                "1. Chá»n video nguá»“n rá»“i táº¡o hoáº·c má»Ÿ dá»± Ã¡n.\n"
+                "2. DÃ¹ng â€œChuáº©n bá»‹ mediaâ€ Ä‘á»ƒ Ä‘á»c metadata vÃ  tÃ¡ch Ã¢m thanh.\n"
+                "3. DÃ¹ng â€œASR -> Dá»‹châ€ Ä‘á»ƒ nháº­n diá»‡n lá»i nÃ³i vÃ  táº¡o báº£n dá»‹ch.\n"
+                "4. Náº¿u cáº§n lá»“ng tiáº¿ng hoáº·c xuáº¥t video ngay, dÃ¹ng cÃ¡c quy trÃ¬nh nhanh cÃ²n láº¡i.",
             )
         )
         layout.addStretch(1)
@@ -324,11 +333,11 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        group = QGroupBox("ASR và Dịch")
+        group = QGroupBox("ASR vÃ  Dá»‹ch")
         form = QFormLayout(group)
         self._configure_form_layout(form)
 
-        self._asr_summary = self._create_info_label("Chưa có kết quả ASR")
+        self._asr_summary = self._create_info_label("ChÆ°a cÃ³ káº¿t quáº£ ASR")
         self._asr_engine_combo = QComboBox()
         self._asr_engine_combo.addItems(["faster-whisper"])
         self._asr_model_combo = QComboBox()
@@ -336,22 +345,22 @@ class MainWindow(QMainWindow):
         self._asr_model_combo.setCurrentText(self._settings.default_asr_model)
         self._asr_language_combo = QComboBox()
         self._asr_language_combo.addItems(["auto", "vi", "zh", "en"])
-        self._vad_checkbox = QCheckBox("Bật lọc VAD")
+        self._vad_checkbox = QCheckBox("Báº­t lá»c VAD")
         self._vad_checkbox.setChecked(True)
-        self._word_timestamps_checkbox = QCheckBox("Lấy mốc thời gian theo từ")
+        self._word_timestamps_checkbox = QCheckBox("Láº¥y má»‘c thá»i gian theo tá»«")
         self._word_timestamps_checkbox.setChecked(True)
         self._prompt_combo = QComboBox()
         self._translation_mode_info = self._create_info_label("legacy")
         self._translation_model_input = QLineEdit()
         self._translation_model_input.setPlaceholderText("gpt-4.1-mini")
-        self._translation_summary = self._create_info_label("Chưa có kết quả dịch")
-        self._review_summary = self._create_info_label("Chưa có hàng review semantic")
+        self._translation_summary = self._create_info_label("ChÆ°a cÃ³ káº¿t quáº£ dá»‹ch")
+        self._review_summary = self._create_info_label("ChÆ°a cÃ³ hÃ ng review semantic")
 
-        run_asr_button = QPushButton("Chạy ASR")
+        run_asr_button = QPushButton("Cháº¡y ASR")
         run_asr_button.clicked.connect(self._run_asr_job)
-        reload_prompts_button = QPushButton("Nạp lại prompt")
+        reload_prompts_button = QPushButton("Náº¡p láº¡i prompt")
         reload_prompts_button.clicked.connect(self._reload_prompt_templates)
-        run_translate_button = QPushButton("Chạy dịch")
+        run_translate_button = QPushButton("Cháº¡y dá»‹ch")
         run_translate_button.clicked.connect(self._run_translation_job)
         translate_buttons = QHBoxLayout()
         translate_buttons.addWidget(reload_prompts_button)
@@ -359,12 +368,12 @@ class MainWindow(QMainWindow):
         translate_buttons.addStretch(1)
         translate_container = QWidget()
         translate_container.setLayout(translate_buttons)
-        review_group = QGroupBox("Review Ngữ Cảnh")
+        review_group = QGroupBox("Review Ngá»¯ Cáº£nh")
         review_layout = QVBoxLayout(review_group)
         review_layout.addWidget(self._review_summary)
         self._review_table = QTableWidget(0, 7)
         self._review_table.setHorizontalHeaderLabels(
-            ["#", "Scene", "Nguồn", "Speaker", "Listener", "Xưng hô", "Lý do"]
+            ["#", "Scene", "Nguá»“n", "Speaker", "Listener", "XÆ°ng hÃ´", "LÃ½ do"]
         )
         self._review_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._review_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -396,27 +405,27 @@ class MainWindow(QMainWindow):
         self._review_tts_input = QLineEdit()
         review_form.addRow("Speaker", self._review_speaker_input)
         review_form.addRow("Listener", self._review_listener_input)
-        review_form.addRow("Tự xưng", self._review_self_term_input)
-        review_form.addRow("Gọi người nghe", self._review_address_term_input)
-        review_form.addRow("Phụ đề duyệt", self._review_subtitle_input)
-        review_form.addRow("Lời TTS duyệt", self._review_tts_input)
+        review_form.addRow("Tá»± xÆ°ng", self._review_self_term_input)
+        review_form.addRow("Gá»i ngÆ°á»i nghe", self._review_address_term_input)
+        review_form.addRow("Phá»¥ Ä‘á» duyá»‡t", self._review_subtitle_input)
+        review_form.addRow("Lá»i TTS duyá»‡t", self._review_tts_input)
         review_layout.addLayout(review_form)
         review_button_row = QHBoxLayout()
-        reload_review_button = QPushButton("Nạp review")
+        reload_review_button = QPushButton("Náº¡p review")
         reload_review_button.clicked.connect(self._reload_review_queue)
-        approve_line_button = QPushButton("Khóa dòng")
+        approve_line_button = QPushButton("KhÃ³a dÃ²ng")
         approve_line_button.clicked.connect(lambda checked=False: self._apply_review_resolution("line"))
-        approve_scene_button = QPushButton("Khóa scene")
+        approve_scene_button = QPushButton("KhÃ³a scene")
         approve_scene_button.clicked.connect(lambda checked=False: self._apply_review_resolution("scene"))
-        approve_relation_button = QPushButton("Khóa quan hệ")
+        approve_relation_button = QPushButton("KhÃ³a quan há»‡")
         approve_relation_button.clicked.connect(
             lambda checked=False: self._apply_review_resolution("project-relationship")
         )
-        select_scene_button = QPushButton("Chọn cùng scene")
+        select_scene_button = QPushButton("Chá»n cÃ¹ng scene")
         select_scene_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("scene"))
-        select_relation_button = QPushButton("Chọn cùng quan hệ")
+        select_relation_button = QPushButton("Chá»n cÃ¹ng quan há»‡")
         select_relation_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("relation"))
-        approve_selected_button = QPushButton("Áp cho dòng chọn")
+        approve_selected_button = QPushButton("Ãp cho dÃ²ng chá»n")
         approve_selected_button.clicked.connect(self._apply_review_resolution_to_selected_rows)
         review_button_row.addWidget(reload_review_button)
         review_button_row.addWidget(approve_line_button)
@@ -429,14 +438,14 @@ class MainWindow(QMainWindow):
         review_layout.addLayout(review_button_row)
 
         form.addRow("Engine ASR", self._asr_engine_combo)
-        form.addRow("Mô hình", self._asr_model_combo)
-        form.addRow("Ngôn ngữ ASR", self._asr_language_combo)
+        form.addRow("MÃ´ hÃ¬nh", self._asr_model_combo)
+        form.addRow("NgÃ´n ngá»¯ ASR", self._asr_language_combo)
         form.addRow("", self._vad_checkbox)
         form.addRow("", self._word_timestamps_checkbox)
         form.addRow("", run_asr_button)
-        form.addRow("Chế độ dịch", self._translation_mode_info)
-        form.addRow("Mẫu prompt", self._prompt_combo)
-        form.addRow("Mô hình dịch", self._translation_model_input)
+        form.addRow("Cháº¿ Ä‘á»™ dá»‹ch", self._translation_mode_info)
+        form.addRow("Máº«u prompt", self._prompt_combo)
+        form.addRow("MÃ´ hÃ¬nh dá»‹ch", self._translation_model_input)
         form.addRow("", translate_container)
 
         layout.addWidget(self._asr_summary)
@@ -445,9 +454,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(review_group)
         layout.addWidget(
             self._build_placeholder_group(
-                "Hướng dẫn",
-                "ASR sẽ đọc lời thoại từ âm thanh 16 kHz. Bước dịch dùng OpenAI Responses API "
-                "và Structured Outputs để tạo bản dịch ổn định cho phụ đề.",
+                "HÆ°á»›ng dáº«n",
+                "ASR sáº½ Ä‘á»c lá»i thoáº¡i tá»« Ã¢m thanh 16 kHz. BÆ°á»›c dá»‹ch dÃ¹ng OpenAI Responses API "
+                "vÃ  Structured Outputs Ä‘á»ƒ táº¡o báº£n dá»‹ch á»•n Ä‘á»‹nh cho phá»¥ Ä‘á».",
             )
         )
         layout.addStretch(1)
@@ -456,12 +465,12 @@ class MainWindow(QMainWindow):
     def _build_subtitle_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self._subtitle_summary = self._create_info_label("Chưa có file phụ đề đầu ra")
-        self._subtitle_editor_status = self._create_info_label("Chưa nạp dữ liệu vào trình biên tập")
-        self._subtitle_qc_summary = self._create_info_label("QC phụ đề chưa được chạy")
+        self._subtitle_summary = self._create_info_label("ChÆ°a cÃ³ file phá»¥ Ä‘á» Ä‘áº§u ra")
+        self._subtitle_editor_status = self._create_info_label("ChÆ°a náº¡p dá»¯ liá»‡u vÃ o trÃ¬nh biÃªn táº­p")
+        self._subtitle_qc_summary = self._create_info_label("QC phá»¥ Ä‘á» chÆ°a Ä‘Æ°á»£c cháº¡y")
         self._subtitle_table = QTableWidget(0, 8)
         self._subtitle_table.setHorizontalHeaderLabels(
-            ["#", "Bắt đầu", "Kết thúc", "Nguồn", "Bản dịch", "Phụ đề", "Lời TTS", "Trạng thái"]
+            ["#", "Báº¯t Ä‘áº§u", "Káº¿t thÃºc", "Nguá»“n", "Báº£n dá»‹ch", "Phá»¥ Ä‘á»", "Lá»i TTS", "Tráº¡ng thÃ¡i"]
         )
         self._subtitle_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._subtitle_table.setAlternatingRowColors(True)
@@ -479,7 +488,7 @@ class MainWindow(QMainWindow):
         subtitle_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
         self._subtitle_table.itemChanged.connect(self._handle_subtitle_item_changed)
         self._subtitle_qc_table = QTableWidget(0, 4)
-        self._subtitle_qc_table.setHorizontalHeaderLabels(["Dòng", "Mã lỗi", "Mức độ", "Chi tiết"])
+        self._subtitle_qc_table.setHorizontalHeaderLabels(["DÃ²ng", "MÃ£ lá»—i", "Má»©c Ä‘á»™", "Chi tiáº¿t"])
         self._subtitle_qc_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._subtitle_qc_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._subtitle_qc_table.setAlternatingRowColors(True)
@@ -496,38 +505,38 @@ class MainWindow(QMainWindow):
         self._find_input = QLineEdit()
         self._replace_input = QLineEdit()
         self._replace_target_combo = QComboBox()
-        self._replace_target_combo.addItem("Phụ đề", "subtitle")
-        self._replace_target_combo.addItem("Bản dịch", "translated")
+        self._replace_target_combo.addItem("Phá»¥ Ä‘á»", "subtitle")
+        self._replace_target_combo.addItem("Báº£n dá»‹ch", "translated")
         self._replace_target_combo.addItem("TTS", "tts")
-        self._replace_target_combo.addItem("Tất cả", "all")
+        self._replace_target_combo.addItem("Táº¥t cáº£", "all")
 
-        reload_button = QPushButton("Nạp lại từ CSDL")
+        reload_button = QPushButton("Náº¡p láº¡i tá»« CSDL")
         reload_button.clicked.connect(lambda: self._reload_subtitle_editor_from_db(force=True))
-        translated_to_subtitle_button = QPushButton("Bản dịch -> Phụ đề")
+        translated_to_subtitle_button = QPushButton("Báº£n dá»‹ch -> Phá»¥ Ä‘á»")
         translated_to_subtitle_button.clicked.connect(self._apply_translated_to_subtitle)
-        subtitle_to_tts_button = QPushButton("Phụ đề -> Lời TTS")
+        subtitle_to_tts_button = QPushButton("Phá»¥ Ä‘á» -> Lá»i TTS")
         subtitle_to_tts_button.clicked.connect(self._apply_subtitle_to_tts)
-        polish_tts_button = QPushButton("Làm mượt Lời TTS")
+        polish_tts_button = QPushButton("LÃ m mÆ°á»£t Lá»i TTS")
         polish_tts_button.clicked.connect(self._polish_tts_texts)
-        split_button = QPushButton("Tách dòng chọn")
+        split_button = QPushButton("TÃ¡ch dÃ²ng chá»n")
         split_button.clicked.connect(self._split_selected_subtitle_row)
-        merge_button = QPushButton("Gộp với dòng sau")
+        merge_button = QPushButton("Gá»™p vá»›i dÃ²ng sau")
         merge_button.clicked.connect(self._merge_selected_subtitle_row_with_next)
-        save_button = QPushButton("Lưu chỉnh sửa")
+        save_button = QPushButton("LÆ°u chá»‰nh sá»­a")
         save_button.clicked.connect(self._save_subtitle_edits)
-        shift_button = QPushButton("Dịch toàn bộ")
+        shift_button = QPushButton("Dá»‹ch toÃ n bá»™")
         shift_button.clicked.connect(self._apply_shift_to_subtitle_rows)
-        replace_button = QPushButton("Tìm và thay thế")
+        replace_button = QPushButton("TÃ¬m vÃ  thay tháº¿")
         replace_button.clicked.connect(self._apply_find_replace)
-        qc_button = QPushButton("Chạy QC")
+        qc_button = QPushButton("Cháº¡y QC")
         qc_button.clicked.connect(self._run_subtitle_qc)
-        preview_from_start_button = QPushButton("Xem từ đầu")
+        preview_from_start_button = QPushButton("Xem tá»« Ä‘áº§u")
         preview_from_start_button.clicked.connect(lambda: self._preview_subtitles(start_from_selected=False))
-        preview_selected_button = QPushButton("Xem dòng chọn")
+        preview_selected_button = QPushButton("Xem dÃ²ng chá»n")
         preview_selected_button.clicked.connect(lambda: self._preview_subtitles(start_from_selected=True))
-        export_srt_button = QPushButton("Xuất SRT")
+        export_srt_button = QPushButton("Xuáº¥t SRT")
         export_srt_button.clicked.connect(lambda: self._run_export_subtitles_job("srt"))
-        export_ass_button = QPushButton("Xuất ASS")
+        export_ass_button = QPushButton("Xuáº¥t ASS")
         export_ass_button.clicked.connect(lambda: self._run_export_subtitles_job("ass"))
 
         action_row_top = QHBoxLayout()
@@ -553,14 +562,14 @@ class MainWindow(QMainWindow):
         action_container.setLayout(action_row)
 
         shift_row = QHBoxLayout()
-        shift_row.addWidget(QLabel("Dịch thời gian (ms)"))
+        shift_row.addWidget(QLabel("Dá»‹ch thá»i gian (ms)"))
         shift_row.addWidget(self._shift_input)
         shift_row.addWidget(shift_button)
         shift_row.addStretch(1)
         replace_row = QHBoxLayout()
-        replace_row.addWidget(QLabel("Tìm"))
+        replace_row.addWidget(QLabel("TÃ¬m"))
         replace_row.addWidget(self._find_input)
-        replace_row.addWidget(QLabel("Thay bằng"))
+        replace_row.addWidget(QLabel("Thay báº±ng"))
         replace_row.addWidget(self._replace_input)
         replace_row.addWidget(self._replace_target_combo)
         replace_row.addWidget(replace_button)
@@ -580,11 +589,11 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._subtitle_qc_table)
         layout.addWidget(
             self._build_placeholder_group(
-                "Hướng dẫn",
-                "Bạn có thể sửa thời gian, bản dịch, phụ đề và nội dung TTS ngay trong bảng. "
-                "Nếu muốn giọng đọc tự nhiên hơn, hãy dùng `Phụ đề -> Lời TTS` rồi `Làm mượt Lời TTS`, "
-                "sau đó tinh chỉnh riêng những câu quan trọng. Hãy chạy QC trước khi xuất để kiểm tra lỗi chồng dòng, "
-                "tốc độ đọc và độ dài câu.",
+                "HÆ°á»›ng dáº«n",
+                "Báº¡n cÃ³ thá»ƒ sá»­a thá»i gian, báº£n dá»‹ch, phá»¥ Ä‘á» vÃ  ná»™i dung TTS ngay trong báº£ng. "
+                "Náº¿u muá»‘n giá»ng Ä‘á»c tá»± nhiÃªn hÆ¡n, hÃ£y dÃ¹ng `Phá»¥ Ä‘á» -> Lá»i TTS` rá»“i `LÃ m mÆ°á»£t Lá»i TTS`, "
+                "sau Ä‘Ã³ tinh chá»‰nh riÃªng nhá»¯ng cÃ¢u quan trá»ng. HÃ£y cháº¡y QC trÆ°á»›c khi xuáº¥t Ä‘á»ƒ kiá»ƒm tra lá»—i chá»“ng dÃ²ng, "
+                "tá»‘c Ä‘á»™ Ä‘á»c vÃ  Ä‘á»™ dÃ i cÃ¢u.",
             )
         )
         return widget
@@ -592,19 +601,19 @@ class MainWindow(QMainWindow):
     def _build_voiceover_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self._voice_summary = self._create_info_label("Chưa có preset giọng hoặc kết quả TTS")
-        self._mix_summary = self._create_info_label("Chưa có âm thanh đã trộn")
+        self._voice_summary = self._create_info_label("ChÆ°a cÃ³ preset giá»ng hoáº·c káº¿t quáº£ TTS")
+        self._mix_summary = self._create_info_label("ChÆ°a cÃ³ Ã¢m thanh Ä‘Ã£ trá»™n")
         self._voice_combo = QComboBox()
         self._voice_combo.currentIndexChanged.connect(self._handle_voice_preset_changed)
         self._voice_profile_name_input = QLineEdit()
-        self._voice_profile_name_input.setPlaceholderText("Tên preset giọng")
+        self._voice_profile_name_input.setPlaceholderText("TÃªn preset giá»ng")
         self._voice_profile_name_input.textChanged.connect(lambda _text: self._handle_voice_profile_form_changed())
         self._voice_engine_combo = QComboBox()
         self._voice_engine_combo.addItem("Windows SAPI", "sapi")
         self._voice_engine_combo.addItem("VieNeu", "vieneu")
         self._voice_engine_combo.currentIndexChanged.connect(self._handle_voice_profile_form_changed)
         self._voice_id_input = QLineEdit()
-        self._voice_id_input.setPlaceholderText("default hoặc tên giọng")
+        self._voice_id_input.setPlaceholderText("default hoáº·c tÃªn giá»ng")
         self._voice_id_input.textChanged.connect(lambda _text: self._handle_voice_profile_form_changed())
         self._voice_language_input = QLineEdit()
         self._voice_language_input.setPlaceholderText("vi / en / auto")
@@ -617,36 +626,36 @@ class MainWindow(QMainWindow):
         self._voice_profile_volume_input.textChanged.connect(lambda _text: self._handle_voice_profile_form_changed())
         self._voice_pitch_input = QLineEdit("0.0")
         self._voice_pitch_input.textChanged.connect(lambda _text: self._handle_voice_profile_form_changed())
-        self._voice_info = self._create_info_label("Giọng SAPI đã phát hiện: chưa nạp")
-        self._voice_preset_notes = self._create_info_label("Chưa có ghi chú cho preset")
-        self._voice_clone_status = self._create_info_label("Preset clone chưa được cấu hình")
-        self._voice_profile_status = self._create_info_label("Quản lý preset giọng đã sẵn sàng")
-        self._speaker_binding_status = self._create_info_label("Speaker binding: chưa có dữ liệu")
+        self._voice_info = self._create_info_label("Giá»ng SAPI Ä‘Ã£ phÃ¡t hiá»‡n: chÆ°a náº¡p")
+        self._voice_preset_notes = self._create_info_label("ChÆ°a cÃ³ ghi chÃº cho preset")
+        self._voice_clone_status = self._create_info_label("Preset clone chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh")
+        self._voice_profile_status = self._create_info_label("Quáº£n lÃ½ preset giá»ng Ä‘Ã£ sáºµn sÃ ng")
+        self._speaker_binding_status = self._create_info_label("Speaker binding: chÆ°a cÃ³ dá»¯ liá»‡u")
         self._speaker_binding_hint = self._create_info_label(
-            "Mẹo: nếu đã lưu ít nhất 1 speaker binding, mọi speaker nhận diện rõ trong track hiện tại phải được gán preset. Speaker unknown vẫn dùng preset mặc định."
+            "Máº¹o: náº¿u Ä‘Ã£ lÆ°u Ã­t nháº¥t 1 speaker binding, má»i speaker nháº­n diá»‡n rÃµ trong track hiá»‡n táº¡i pháº£i Ä‘Æ°á»£c gÃ¡n preset. Speaker unknown váº«n dÃ¹ng preset máº·c Ä‘á»‹nh."
         )
-        self._voice_policy_status = self._create_info_label("Voice policy: chưa có dữ liệu")
+        self._voice_policy_status = self._create_info_label("Voice policy: chÆ°a cÃ³ dá»¯ liá»‡u")
         self._voice_policy_hint = self._create_info_label(
-            "Mẹo: voice policy là fallback mềm. Quan hệ speaker->listener sẽ ưu tiên hơn policy theo nhân vật, nhưng speaker binding vẫn là mức ưu tiên cao nhất."
+            "Máº¹o: voice policy lÃ  fallback má»m. Quan há»‡ speaker->listener sáº½ Æ°u tiÃªn hÆ¡n policy theo nhÃ¢n váº­t, nhÆ°ng speaker binding váº«n lÃ  má»©c Æ°u tiÃªn cao nháº¥t."
         )
         self._voice_notes_input = QPlainTextEdit()
-        self._voice_notes_input.setPlaceholderText("Ghi chú preset hoặc ghi chú về cấu hình clone")
+        self._voice_notes_input.setPlaceholderText("Ghi chÃº preset hoáº·c ghi chÃº vá» cáº¥u hÃ¬nh clone")
         self._voice_notes_input.setFixedHeight(56)
         self._voice_notes_input.textChanged.connect(self._handle_voice_profile_form_changed)
         self._vieneu_ref_audio_input = QLineEdit()
-        self._vieneu_ref_audio_input.setPlaceholderText("assets/voices/reference.wav hoặc đường dẫn tuyệt đối")
+        self._vieneu_ref_audio_input.setPlaceholderText("assets/voices/reference.wav hoáº·c Ä‘Æ°á»ng dáº«n tuyá»‡t Ä‘á»‘i")
         self._vieneu_ref_audio_input.textChanged.connect(lambda _text: self._handle_voice_clone_form_changed())
         self._vieneu_ref_text_input = QPlainTextEdit()
-        self._vieneu_ref_text_input.setPlaceholderText("Nhập câu đọc gốc khớp với file audio mẫu")
+        self._vieneu_ref_text_input.setPlaceholderText("Nháº­p cÃ¢u Ä‘á»c gá»‘c khá»›p vá»›i file audio máº«u")
         self._vieneu_ref_text_input.setFixedHeight(72)
         self._vieneu_ref_text_input.textChanged.connect(self._handle_voice_clone_form_changed)
         self._bgm_path_input = QLineEdit()
-        self._bgm_path_input.setPlaceholderText("Đường dẫn BGM tùy chọn")
+        self._bgm_path_input.setPlaceholderText("ÄÆ°á»ng dáº«n BGM tÃ¹y chá»n")
         self._original_volume_input = QLineEdit("0.35")
         self._voice_volume_input = QLineEdit("1.0")
         self._bgm_volume_input = QLineEdit("0.15")
         self._speaker_binding_table = QTableWidget(0, 4)
-        self._speaker_binding_table.setHorizontalHeaderLabels(["Speaker", "Số dòng", "Preset giọng", "Trạng thái"])
+        self._speaker_binding_table.setHorizontalHeaderLabels(["Speaker", "Sá»‘ dÃ²ng", "Preset giá»ng", "Tráº¡ng thÃ¡i"])
         self._speaker_binding_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._speaker_binding_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._speaker_binding_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -658,9 +667,9 @@ class MainWindow(QMainWindow):
         speaker_binding_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         speaker_binding_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         speaker_binding_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self._character_voice_policy_table = QTableWidget(0, 4)
+        self._character_voice_policy_table = QTableWidget(0, 7)
         self._character_voice_policy_table.setHorizontalHeaderLabels(
-            ["Nhân vật", "Số dòng", "Preset mặc định", "Trạng thái"]
+            ["NhÃ¢n váº­t", "Sá»‘ dÃ²ng", "Preset máº·c Ä‘á»‹nh", "Tá»‘c Ä‘á»™", "Ã‚m lÆ°á»£ng", "Cao Ä‘á»™", "Tráº¡ng thÃ¡i"]
         )
         self._character_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._character_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -672,10 +681,13 @@ class MainWindow(QMainWindow):
         character_policy_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         character_policy_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         character_policy_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        character_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self._relationship_voice_policy_table = QTableWidget(0, 4)
+        character_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        character_policy_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        character_policy_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        character_policy_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self._relationship_voice_policy_table = QTableWidget(0, 7)
         self._relationship_voice_policy_table.setHorizontalHeaderLabels(
-            ["Quan hệ", "Số dòng", "Preset override", "Trạng thái"]
+            ["Quan há»‡", "Sá»‘ dÃ²ng", "Preset override", "Tá»‘c Ä‘á»™", "Ã‚m lÆ°á»£ng", "Cao Ä‘á»™", "Tráº¡ng thÃ¡i"]
         )
         self._relationship_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._relationship_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -687,33 +699,36 @@ class MainWindow(QMainWindow):
         relationship_policy_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         relationship_policy_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         relationship_policy_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        relationship_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        relationship_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        relationship_policy_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        relationship_policy_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        relationship_policy_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
 
-        reload_voices_button = QPushButton("Nạp lại preset")
+        reload_voices_button = QPushButton("Náº¡p láº¡i preset")
         reload_voices_button.clicked.connect(self._reload_voice_presets)
-        run_tts_button = QPushButton("Chạy TTS")
+        run_tts_button = QPushButton("Cháº¡y TTS")
         run_tts_button.clicked.connect(self._run_tts_job)
-        build_track_button = QPushButton("Tạo track giọng")
+        build_track_button = QPushButton("Táº¡o track giá»ng")
         build_track_button.clicked.connect(self._run_build_voice_track_job)
-        self._choose_vieneu_ref_audio_button = QPushButton("Chọn audio mẫu")
+        self._choose_vieneu_ref_audio_button = QPushButton("Chá»n audio máº«u")
         self._choose_vieneu_ref_audio_button.clicked.connect(self._choose_vieneu_ref_audio_file)
-        self._save_voice_preset_button = QPushButton("Lưu preset")
+        self._save_voice_preset_button = QPushButton("LÆ°u preset")
         self._save_voice_preset_button.clicked.connect(self._save_current_voice_preset)
-        self._save_voice_preset_as_new_button = QPushButton("Lưu thành bản mới")
+        self._save_voice_preset_as_new_button = QPushButton("LÆ°u thÃ nh báº£n má»›i")
         self._save_voice_preset_as_new_button.clicked.connect(
             lambda checked=False: self._save_current_voice_preset(save_as_new=True)
         )
-        self._delete_voice_preset_button = QPushButton("Xóa preset")
+        self._delete_voice_preset_button = QPushButton("XÃ³a preset")
         self._delete_voice_preset_button.clicked.connect(self._delete_selected_voice_preset)
-        self._batch_import_voice_profiles_button = QPushButton("Nhập hàng loạt từ thư mục mẫu")
+        self._batch_import_voice_profiles_button = QPushButton("Nháº­p hÃ ng loáº¡t tá»« thÆ° má»¥c máº«u")
         self._batch_import_voice_profiles_button.clicked.connect(self._batch_import_voice_profiles)
-        self._reload_speaker_bindings_button = QPushButton("Nạp speaker")
+        self._reload_speaker_bindings_button = QPushButton("Náº¡p speaker")
         self._reload_speaker_bindings_button.clicked.connect(self._reload_speaker_bindings)
-        self._save_speaker_bindings_button = QPushButton("Lưu binding")
+        self._save_speaker_bindings_button = QPushButton("LÆ°u binding")
         self._save_speaker_bindings_button.clicked.connect(self._save_speaker_bindings)
-        self._fill_speaker_bindings_button = QPushButton("Gán preset đang chọn cho ô trống")
+        self._fill_speaker_bindings_button = QPushButton("GÃ¡n preset Ä‘ang chá»n cho Ã´ trá»‘ng")
         self._fill_speaker_bindings_button.clicked.connect(self._fill_unbound_speakers_with_selected_preset)
-        self._clear_speaker_bindings_button = QPushButton("Xóa gán trên form")
+        self._clear_speaker_bindings_button = QPushButton("XÃ³a gÃ¡n trÃªn form")
         self._clear_speaker_bindings_button.clicked.connect(self._clear_speaker_binding_form)
         self._fill_selected_speaker_bindings_button = QPushButton("Gan preset cho dong chon")
         self._fill_selected_speaker_bindings_button.clicked.connect(
@@ -721,26 +736,36 @@ class MainWindow(QMainWindow):
         )
         self._clear_selected_speaker_bindings_button = QPushButton("Xoa dong chon")
         self._clear_selected_speaker_bindings_button.clicked.connect(self._clear_selected_speaker_bindings)
-        self._reload_voice_policies_button = QPushButton("Nạp voice policy")
+        self._reload_voice_policies_button = QPushButton("Náº¡p voice policy")
         self._reload_voice_policies_button.clicked.connect(self._reload_voice_policies)
-        self._save_voice_policies_button = QPushButton("Lưu voice policy")
+        self._save_voice_policies_button = QPushButton("LÆ°u voice policy")
         self._save_voice_policies_button.clicked.connect(self._save_voice_policies)
-        self._fill_voice_policies_button = QPushButton("Gán preset đang chọn cho policy trống")
+        self._fill_voice_policies_button = QPushButton("GÃ¡n preset Ä‘ang chá»n cho policy trá»‘ng")
         self._fill_voice_policies_button.clicked.connect(self._fill_unbound_voice_policies_with_selected_preset)
-        self._clear_voice_policies_button = QPushButton("Xóa policy trên form")
+        self._clear_voice_policies_button = QPushButton("XÃ³a policy trÃªn form")
         self._clear_voice_policies_button.clicked.connect(self._clear_voice_policy_form)
+        self._fill_voice_policy_styles_button = QPushButton("Điền style trống")
+        self._fill_voice_policy_styles_button.clicked.connect(self._fill_unstyled_voice_policies_with_current_style)
+        self._clear_voice_policy_styles_button = QPushButton("Xóa style form")
+        self._clear_voice_policy_styles_button.clicked.connect(self._clear_voice_policy_form_styles)
         self._fill_selected_voice_policies_button = QPushButton("Gan preset cho dong chon")
         self._fill_selected_voice_policies_button.clicked.connect(
             self._fill_selected_voice_policy_rows_with_selected_preset
         )
+        self._fill_selected_voice_policy_styles_button = QPushButton("Điền style dòng chọn")
+        self._fill_selected_voice_policy_styles_button.clicked.connect(
+            self._fill_selected_voice_policy_rows_with_current_style
+        )
         self._clear_selected_voice_policies_button = QPushButton("Xoa dong chon")
         self._clear_selected_voice_policies_button.clicked.connect(self._clear_selected_voice_policy_rows)
-        choose_bgm_button = QPushButton("Chọn BGM")
+        self._clear_selected_voice_policy_styles_button = QPushButton("Xóa style dòng chọn")
+        self._clear_selected_voice_policy_styles_button.clicked.connect(self._clear_selected_voice_policy_row_styles)
+        choose_bgm_button = QPushButton("Chá»n BGM")
         choose_bgm_button.clicked.connect(self._choose_bgm_file)
-        mix_button = QPushButton("Trộn âm thanh")
+        mix_button = QPushButton("Trá»™n Ã¢m thanh")
         mix_button.clicked.connect(self._run_mixdown_job)
 
-        group = QGroupBox("Preset giọng, TTS và trộn âm thanh")
+        group = QGroupBox("Preset giá»ng, TTS vÃ  trá»™n Ã¢m thanh")
         form = QFormLayout(group)
         self._configure_form_layout(form)
         action_row = QHBoxLayout()
@@ -785,10 +810,14 @@ class MainWindow(QMainWindow):
         voice_policy_actions_top.addWidget(self._save_voice_policies_button)
         voice_policy_actions_top.addWidget(self._fill_voice_policies_button)
         voice_policy_actions_top.addWidget(self._clear_voice_policies_button)
+        voice_policy_actions_top.addWidget(self._fill_voice_policy_styles_button)
+        voice_policy_actions_top.addWidget(self._clear_voice_policy_styles_button)
         voice_policy_actions_top.addStretch(1)
         voice_policy_actions_bottom = QHBoxLayout()
         voice_policy_actions_bottom.addWidget(self._fill_selected_voice_policies_button)
         voice_policy_actions_bottom.addWidget(self._clear_selected_voice_policies_button)
+        voice_policy_actions_bottom.addWidget(self._fill_selected_voice_policy_styles_button)
+        voice_policy_actions_bottom.addWidget(self._clear_selected_voice_policy_styles_button)
         voice_policy_actions_bottom.addStretch(1)
         voice_policy_actions = QVBoxLayout()
         voice_policy_actions.addLayout(voice_policy_actions_top)
@@ -809,15 +838,15 @@ class MainWindow(QMainWindow):
         bgm_container.setLayout(bgm_row)
 
         profile_numeric_row_top = QHBoxLayout()
-        profile_numeric_row_top.addWidget(QLabel("Tần số mẫu"))
+        profile_numeric_row_top.addWidget(QLabel("Táº§n sá»‘ máº«u"))
         profile_numeric_row_top.addWidget(self._voice_sample_rate_input)
-        profile_numeric_row_top.addWidget(QLabel("Tốc độ"))
+        profile_numeric_row_top.addWidget(QLabel("Tá»‘c Ä‘á»™"))
         profile_numeric_row_top.addWidget(self._voice_speed_profile_input)
         profile_numeric_row_top.addStretch(1)
         profile_numeric_row_bottom = QHBoxLayout()
-        profile_numeric_row_bottom.addWidget(QLabel("Âm lượng"))
+        profile_numeric_row_bottom.addWidget(QLabel("Ã‚m lÆ°á»£ng"))
         profile_numeric_row_bottom.addWidget(self._voice_profile_volume_input)
-        profile_numeric_row_bottom.addWidget(QLabel("Cao độ"))
+        profile_numeric_row_bottom.addWidget(QLabel("Cao Ä‘á»™"))
         profile_numeric_row_bottom.addWidget(self._voice_pitch_input)
         profile_numeric_row_bottom.addStretch(1)
         profile_numeric_row = QVBoxLayout()
@@ -827,9 +856,9 @@ class MainWindow(QMainWindow):
         profile_numeric_container.setLayout(profile_numeric_row)
 
         mix_row = QHBoxLayout()
-        mix_row.addWidget(QLabel("Audio gốc"))
+        mix_row.addWidget(QLabel("Audio gá»‘c"))
         mix_row.addWidget(self._original_volume_input)
-        mix_row.addWidget(QLabel("Giọng đọc"))
+        mix_row.addWidget(QLabel("Giá»ng Ä‘á»c"))
         mix_row.addWidget(self._voice_volume_input)
         mix_row.addWidget(QLabel("BGM"))
         mix_row.addWidget(self._bgm_volume_input)
@@ -838,42 +867,42 @@ class MainWindow(QMainWindow):
         mix_container = QWidget()
         mix_container.setLayout(mix_row)
 
-        form.addRow("Preset giọng", self._voice_combo)
-        form.addRow("Tên preset", self._voice_profile_name_input)
-        form.addRow("Bộ máy TTS", self._voice_engine_combo)
-        form.addRow("ID giọng", self._voice_id_input)
-        form.addRow("Ngôn ngữ", self._voice_language_input)
-        form.addRow("Thông số giọng", profile_numeric_container)
-        form.addRow("Giọng SAPI phát hiện", self._voice_info)
-        form.addRow("Ghi chú preset", self._voice_preset_notes)
-        form.addRow("Trạng thái chỉnh sửa", self._voice_profile_status)
-        form.addRow("Ghi chú chi tiết", self._voice_notes_input)
-        form.addRow("Trạng thái clone", self._voice_clone_status)
-        form.addRow("Audio mẫu VieNeu", ref_audio_container)
-        form.addRow("Văn bản mẫu VieNeu", self._vieneu_ref_text_input)
+        form.addRow("Preset giá»ng", self._voice_combo)
+        form.addRow("TÃªn preset", self._voice_profile_name_input)
+        form.addRow("Bá»™ mÃ¡y TTS", self._voice_engine_combo)
+        form.addRow("ID giá»ng", self._voice_id_input)
+        form.addRow("NgÃ´n ngá»¯", self._voice_language_input)
+        form.addRow("ThÃ´ng sá»‘ giá»ng", profile_numeric_container)
+        form.addRow("Giá»ng SAPI phÃ¡t hiá»‡n", self._voice_info)
+        form.addRow("Ghi chÃº preset", self._voice_preset_notes)
+        form.addRow("Tráº¡ng thÃ¡i chá»‰nh sá»­a", self._voice_profile_status)
+        form.addRow("Ghi chÃº chi tiáº¿t", self._voice_notes_input)
+        form.addRow("Tráº¡ng thÃ¡i clone", self._voice_clone_status)
+        form.addRow("Audio máº«u VieNeu", ref_audio_container)
+        form.addRow("VÄƒn báº£n máº«u VieNeu", self._vieneu_ref_text_input)
         form.addRow("", profile_action_container)
         form.addRow("", action_container)
         form.addRow("Speaker binding", self._speaker_binding_status)
         form.addRow("", self._speaker_binding_hint)
-        form.addRow("Bảng gán speaker", self._speaker_binding_table)
+        form.addRow("Báº£ng gÃ¡n speaker", self._speaker_binding_table)
         form.addRow("", speaker_binding_actions_container)
         form.addRow("Voice policy", self._voice_policy_status)
         form.addRow("", self._voice_policy_hint)
-        form.addRow("Policy theo nhân vật", self._character_voice_policy_table)
-        form.addRow("Policy theo quan hệ", self._relationship_voice_policy_table)
+        form.addRow("Policy theo nhÃ¢n váº­t", self._character_voice_policy_table)
+        form.addRow("Policy theo quan há»‡", self._relationship_voice_policy_table)
         form.addRow("", voice_policy_actions_container)
-        form.addRow("BGM tùy chọn", bgm_container)
-        form.addRow("Mức âm khi trộn", mix_container)
+        form.addRow("BGM tÃ¹y chá»n", bgm_container)
+        form.addRow("Má»©c Ã¢m khi trá»™n", mix_container)
 
         layout.addWidget(self._voice_summary)
         layout.addWidget(self._mix_summary)
         layout.addWidget(group)
         layout.addWidget(
             self._build_placeholder_group(
-                "Hướng dẫn",
-                "VieNeu phù hợp nhất cho giọng tiếng Việt. Nếu bạn cần nhân bản giọng, hãy điền audio mẫu "
-                "và văn bản mẫu đúng với audio đó trước khi chạy TTS hoặc nhập hàng loạt từ thư mục `assets/voices`. "
-                "Để giọng đọc tự nhiên hơn, hãy viết cột `Lời TTS` theo văn nói ngắn gọn rồi mới chạy TTS.",
+                "HÆ°á»›ng dáº«n",
+                "VieNeu phÃ¹ há»£p nháº¥t cho giá»ng tiáº¿ng Viá»‡t. Náº¿u báº¡n cáº§n nhÃ¢n báº£n giá»ng, hÃ£y Ä‘iá»n audio máº«u "
+                "vÃ  vÄƒn báº£n máº«u Ä‘Ãºng vá»›i audio Ä‘Ã³ trÆ°á»›c khi cháº¡y TTS hoáº·c nháº­p hÃ ng loáº¡t tá»« thÆ° má»¥c `assets/voices`. "
+                "Äá»ƒ giá»ng Ä‘á»c tá»± nhiÃªn hÆ¡n, hÃ£y viáº¿t cá»™t `Lá»i TTS` theo vÄƒn nÃ³i ngáº¯n gá»n rá»“i má»›i cháº¡y TTS.",
             )
         )
         layout.addStretch(1)
@@ -882,30 +911,30 @@ class MainWindow(QMainWindow):
     def _build_export_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self._export_summary = self._create_info_label("Chưa có video đầu ra")
+        self._export_summary = self._create_info_label("ChÆ°a cÃ³ video Ä‘áº§u ra")
         self._export_preset_combo = QComboBox()
         self._export_preset_combo.currentIndexChanged.connect(self._handle_export_preset_changed)
-        self._burn_subtitles_checkbox = QCheckBox("Ghi cứng phụ đề vào video")
+        self._burn_subtitles_checkbox = QCheckBox("Ghi cá»©ng phá»¥ Ä‘á» vÃ o video")
         self._burn_subtitles_checkbox.setChecked(True)
         self._burn_subtitles_checkbox.stateChanged.connect(self._handle_export_mode_changed)
         self._watermark_profile_combo = QComboBox()
         self._watermark_profile_combo.currentIndexChanged.connect(self._handle_watermark_profile_changed)
         self._watermark_profile_name_input = QLineEdit()
-        self._watermark_profile_name_input.setPlaceholderText("Tên profile watermark hoặc logo")
+        self._watermark_profile_name_input.setPlaceholderText("TÃªn profile watermark hoáº·c logo")
         self._watermark_profile_name_input.textChanged.connect(
             lambda _text: self._handle_watermark_form_changed()
         )
-        self._watermark_profile_status = self._create_info_label("Chưa có profile watermark")
-        self._watermark_enabled_checkbox = QCheckBox("Bật watermark hoặc logo")
+        self._watermark_profile_status = self._create_info_label("ChÆ°a cÃ³ profile watermark")
+        self._watermark_enabled_checkbox = QCheckBox("Báº­t watermark hoáº·c logo")
         self._watermark_enabled_checkbox.stateChanged.connect(self._handle_watermark_form_changed)
         self._watermark_path_input = QLineEdit()
-        self._watermark_path_input.setPlaceholderText("assets/logos/logo.png hoặc đường dẫn tuyệt đối")
+        self._watermark_path_input.setPlaceholderText("assets/logos/logo.png hoáº·c Ä‘Æ°á»ng dáº«n tuyá»‡t Ä‘á»‘i")
         self._watermark_path_input.textChanged.connect(lambda _text: self._handle_watermark_form_changed())
         self._watermark_position_combo = QComboBox()
-        self._watermark_position_combo.addItem("Trên phải", "top-right")
-        self._watermark_position_combo.addItem("Trên trái", "top-left")
-        self._watermark_position_combo.addItem("Dưới phải", "bottom-right")
-        self._watermark_position_combo.addItem("Dưới trái", "bottom-left")
+        self._watermark_position_combo.addItem("TrÃªn pháº£i", "top-right")
+        self._watermark_position_combo.addItem("TrÃªn trÃ¡i", "top-left")
+        self._watermark_position_combo.addItem("DÆ°á»›i pháº£i", "bottom-right")
+        self._watermark_position_combo.addItem("DÆ°á»›i trÃ¡i", "bottom-left")
         self._watermark_position_combo.currentIndexChanged.connect(self._handle_watermark_form_changed)
         self._watermark_opacity_input = QLineEdit("0.85")
         self._watermark_opacity_input.textChanged.connect(lambda _text: self._handle_watermark_form_changed())
@@ -913,21 +942,21 @@ class MainWindow(QMainWindow):
         self._watermark_scale_input.textChanged.connect(lambda _text: self._handle_watermark_form_changed())
         self._watermark_margin_input = QLineEdit("24")
         self._watermark_margin_input.textChanged.connect(lambda _text: self._handle_watermark_form_changed())
-        choose_watermark_button = QPushButton("Chọn logo")
+        choose_watermark_button = QPushButton("Chá»n logo")
         choose_watermark_button.clicked.connect(self._choose_watermark_file)
-        reload_presets_button = QPushButton("Nạp lại preset")
+        reload_presets_button = QPushButton("Náº¡p láº¡i preset")
         reload_presets_button.clicked.connect(self._reload_export_presets)
-        reload_watermarks_button = QPushButton("Nạp lại profile watermark")
+        reload_watermarks_button = QPushButton("Náº¡p láº¡i profile watermark")
         reload_watermarks_button.clicked.connect(self._reload_watermark_profiles)
-        save_watermark_button = QPushButton("Lưu profile")
+        save_watermark_button = QPushButton("LÆ°u profile")
         save_watermark_button.clicked.connect(self._save_current_watermark_profile)
-        save_watermark_as_new_button = QPushButton("Lưu thành bản mới")
+        save_watermark_as_new_button = QPushButton("LÆ°u thÃ nh báº£n má»›i")
         save_watermark_as_new_button.clicked.connect(
             lambda checked=False: self._save_current_watermark_profile(save_as_new=True)
         )
-        export_button = QPushButton("Xuất video")
+        export_button = QPushButton("Xuáº¥t video")
         export_button.clicked.connect(self._run_video_export_job)
-        form_group = QGroupBox("Preset xuất video")
+        form_group = QGroupBox("Preset xuáº¥t video")
         form = QFormLayout(form_group)
         self._configure_form_layout(form)
         watermark_row = QHBoxLayout()
@@ -943,11 +972,11 @@ class MainWindow(QMainWindow):
         watermark_actions_container = QWidget()
         watermark_actions_container.setLayout(watermark_actions)
         watermark_numeric_row = QHBoxLayout()
-        watermark_numeric_row.addWidget(QLabel("Độ mờ"))
+        watermark_numeric_row.addWidget(QLabel("Äá»™ má»"))
         watermark_numeric_row.addWidget(self._watermark_opacity_input)
-        watermark_numeric_row.addWidget(QLabel("Tỷ lệ"))
+        watermark_numeric_row.addWidget(QLabel("Tá»· lá»‡"))
         watermark_numeric_row.addWidget(self._watermark_scale_input)
-        watermark_numeric_row.addWidget(QLabel("Lề"))
+        watermark_numeric_row.addWidget(QLabel("Lá»"))
         watermark_numeric_row.addWidget(self._watermark_margin_input)
         watermark_numeric_row.addStretch(1)
         watermark_numeric_container = QWidget()
@@ -959,23 +988,23 @@ class MainWindow(QMainWindow):
         button_container = QWidget()
         button_container.setLayout(buttons)
         layout.addWidget(self._export_summary)
-        form.addRow("Preset xuất", self._export_preset_combo)
-        form.addRow("Chế độ phụ đề", self._burn_subtitles_checkbox)
+        form.addRow("Preset xuáº¥t", self._export_preset_combo)
+        form.addRow("Cháº¿ Ä‘á»™ phá»¥ Ä‘á»", self._burn_subtitles_checkbox)
         form.addRow("Profile watermark", self._watermark_profile_combo)
-        form.addRow("Tên profile", self._watermark_profile_name_input)
-        form.addRow("Trạng thái profile", self._watermark_profile_status)
-        form.addRow("Bật watermark", self._watermark_enabled_checkbox)
-        form.addRow("Đường dẫn logo", watermark_container)
-        form.addRow("Vị trí", self._watermark_position_combo)
-        form.addRow("Độ mờ / Tỷ lệ / Lề", watermark_numeric_container)
+        form.addRow("TÃªn profile", self._watermark_profile_name_input)
+        form.addRow("Tráº¡ng thÃ¡i profile", self._watermark_profile_status)
+        form.addRow("Báº­t watermark", self._watermark_enabled_checkbox)
+        form.addRow("ÄÆ°á»ng dáº«n logo", watermark_container)
+        form.addRow("Vá»‹ trÃ­", self._watermark_position_combo)
+        form.addRow("Äá»™ má» / Tá»· lá»‡ / Lá»", watermark_numeric_container)
         form.addRow("", watermark_actions_container)
         layout.addWidget(form_group)
         layout.addWidget(button_container)
         layout.addWidget(
             self._build_placeholder_group(
-                "Hướng dẫn",
-                "Chọn preset xuất bản để quyết định tỷ lệ khung hình và kiểu chèn phụ đề. "
-                "Nếu cần logo, bạn có thể chỉnh nhanh trong form rồi lưu lại thành profile để dùng cho các lần xuất sau.",
+                "HÆ°á»›ng dáº«n",
+                "Chá»n preset xuáº¥t báº£n Ä‘á»ƒ quyáº¿t Ä‘á»‹nh tá»· lá»‡ khung hÃ¬nh vÃ  kiá»ƒu chÃ¨n phá»¥ Ä‘á». "
+                "Náº¿u cáº§n logo, báº¡n cÃ³ thá»ƒ chá»‰nh nhanh trong form rá»“i lÆ°u láº¡i thÃ nh profile Ä‘á»ƒ dÃ¹ng cho cÃ¡c láº§n xuáº¥t sau.",
             )
         )
         layout.addStretch(1)
@@ -985,7 +1014,7 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        group = QGroupBox("Đường dẫn công cụ và cài đặt ứng dụng")
+        group = QGroupBox("ÄÆ°á»ng dáº«n cÃ´ng cá»¥ vÃ  cÃ i Ä‘áº·t á»©ng dá»¥ng")
         form = QFormLayout(group)
         self._configure_form_layout(form)
 
@@ -997,11 +1026,11 @@ class MainWindow(QMainWindow):
         self._openai_key_input = QLineEdit()
         self._openai_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._default_translation_model_input = QLineEdit()
-        self._ffmpeg_status = self._create_info_label("Chưa kiểm tra")
+        self._ffmpeg_status = self._create_info_label("ChÆ°a kiá»ƒm tra")
 
-        save_button = QPushButton("Lưu cài đặt")
+        save_button = QPushButton("LÆ°u cÃ i Ä‘áº·t")
         save_button.clicked.connect(self._save_settings)
-        check_button = QPushButton("Kiểm tra FFmpeg")
+        check_button = QPushButton("Kiá»ƒm tra FFmpeg")
         check_button.clicked.connect(self._check_ffmpeg)
 
         buttons = QHBoxLayout()
@@ -1011,21 +1040,21 @@ class MainWindow(QMainWindow):
         button_container = QWidget()
         button_container.setLayout(buttons)
 
-        form.addRow("Ngôn ngữ giao diện", self._ui_language_input)
-        form.addRow("Đường dẫn ffmpeg", self._ffmpeg_path_input)
-        form.addRow("Đường dẫn ffprobe", self._ffprobe_path_input)
-        form.addRow("Đường dẫn mpv DLL", self._mpv_path_input)
-        form.addRow("Thư mục cache model", self._model_cache_input)
+        form.addRow("NgÃ´n ngá»¯ giao diá»‡n", self._ui_language_input)
+        form.addRow("ÄÆ°á»ng dáº«n ffmpeg", self._ffmpeg_path_input)
+        form.addRow("ÄÆ°á»ng dáº«n ffprobe", self._ffprobe_path_input)
+        form.addRow("ÄÆ°á»ng dáº«n mpv DLL", self._mpv_path_input)
+        form.addRow("ThÆ° má»¥c cache model", self._model_cache_input)
         form.addRow("OpenAI API key", self._openai_key_input)
-        form.addRow("Mô hình dịch mặc định", self._default_translation_model_input)
+        form.addRow("MÃ´ hÃ¬nh dá»‹ch máº·c Ä‘á»‹nh", self._default_translation_model_input)
         form.addRow("", button_container)
-        form.addRow("Trạng thái kiểm tra", self._ffmpeg_status)
+        form.addRow("Tráº¡ng thÃ¡i kiá»ƒm tra", self._ffmpeg_status)
 
         layout.addWidget(group)
         layout.addWidget(
             self._build_placeholder_group(
-                "Gợi ý",
-                "OpenAI API key chỉ cần cho bước dịch. mpv DLL chỉ cần khi bạn muốn xem trước phụ đề trong mpv.",
+                "Gá»£i Ã½",
+                "OpenAI API key chá»‰ cáº§n cho bÆ°á»›c dá»‹ch. mpv DLL chá»‰ cáº§n khi báº¡n muá»‘n xem trÆ°á»›c phá»¥ Ä‘á» trong mpv.",
             )
         )
         layout.addStretch(1)
@@ -1034,7 +1063,7 @@ class MainWindow(QMainWindow):
     def _build_logs_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self._logs_info = self._create_info_label(f"Dữ liệu ứng dụng: {get_appdata_dir()}")
+        self._logs_info = self._create_info_label(f"Dá»¯ liá»‡u á»©ng dá»¥ng: {get_appdata_dir()}")
         self._logs_console = QPlainTextEdit()
         self._logs_console.setReadOnly(True)
         layout.addWidget(self._logs_info)
@@ -1192,16 +1221,16 @@ class MainWindow(QMainWindow):
         self._schedule_preview_reload()
 
     def _choose_project_root(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Chọn thư mục dự án")
+        directory = QFileDialog.getExistingDirectory(self, "Chá»n thÆ° má»¥c dá»± Ã¡n")
         if directory:
             self._project_root_input.setText(directory)
 
     def _choose_source_video(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn video nguồn",
+            "Chá»n video nguá»“n",
             str(Path.cwd()),
-            "Tệp video (*.mp4 *.mkv *.mov *.avi *.webm);;Tất cả tệp (*.*)",
+            "Tá»‡p video (*.mp4 *.mkv *.mov *.avi *.webm);;Táº¥t cáº£ tá»‡p (*.*)",
         )
         if file_path:
             self._source_video_input.setText(file_path)
@@ -1225,7 +1254,7 @@ class MainWindow(QMainWindow):
         self,
     ) -> tuple[ProjectDatabase, object | None, list[object]]:
         if not self._current_workspace:
-            raise ValueError("Chưa có dự án")
+            raise ValueError("ChÆ°a cÃ³ dá»± Ã¡n")
         database = ProjectDatabase(self._current_workspace.database_path)
         track = database.get_active_subtitle_track(self._current_workspace.project_id)
         if track is None:
@@ -1368,18 +1397,18 @@ class MainWindow(QMainWindow):
 
         self._focus_subtitle_table_row(missing_indexes[0])
         if purpose == "tts":
-            action_label = "lồng tiếng"
-            column_hint = "Lời TTS, Phụ đề hoặc Bản dịch"
+            action_label = "lá»“ng tiáº¿ng"
+            column_hint = "Lá»i TTS, Phá»¥ Ä‘á» hoáº·c Báº£n dá»‹ch"
         else:
-            action_label = "xuất phụ đề/video"
-            column_hint = "Phụ đề hoặc Bản dịch"
+            action_label = "xuáº¥t phá»¥ Ä‘á»/video"
+            column_hint = "Phá»¥ Ä‘á» hoáº·c Báº£n dá»‹ch"
         QMessageBox.warning(
             self,
             dialog_title,
             (
-                f"Không thể {action_label} vì còn {len(missing_indexes)} dòng chưa có nội dung tiếng đích.\n"
-                f"- Dòng: {self._format_row_number_list(missing_indexes)}\n"
-                f"- Hãy hoàn tất bước dịch hoặc điền trực tiếp vào cột {column_hint} trước khi tiếp tục."
+                f"KhÃ´ng thá»ƒ {action_label} vÃ¬ cÃ²n {len(missing_indexes)} dÃ²ng chÆ°a cÃ³ ná»™i dung tiáº¿ng Ä‘Ã­ch.\n"
+                f"- DÃ²ng: {self._format_row_number_list(missing_indexes)}\n"
+                f"- HÃ£y hoÃ n táº¥t bÆ°á»›c dá»‹ch hoáº·c Ä‘iá»n trá»±c tiáº¿p vÃ o cá»™t {column_hint} trÆ°á»›c khi tiáº¿p tá»¥c."
             ),
         )
         return False
@@ -1413,7 +1442,7 @@ class MainWindow(QMainWindow):
         report = analyze_subtitle_rows(normalized_rows, config=SubtitleQcConfig())
         self._apply_qc_report_to_ui(report)
         self._append_log_line(
-            f"QC phụ đề trước khi xuất: {report.error_count} lỗi, {report.warning_count} cảnh báo, {report.total_segments} dòng"
+            f"QC phá»¥ Ä‘á» trÆ°á»›c khi xuáº¥t: {report.error_count} lá»—i, {report.warning_count} cáº£nh bÃ¡o, {report.total_segments} dÃ²ng"
         )
         if report.error_count == 0:
             return True
@@ -1424,10 +1453,10 @@ class MainWindow(QMainWindow):
             self,
             dialog_title,
             (
-                f"Không thể xuất khi QC còn {report.error_count} lỗi.\n"
-                f"- Dòng lỗi đầu tiên: {first_error.segment_index + 1}\n"
+                f"KhÃ´ng thá»ƒ xuáº¥t khi QC cÃ²n {report.error_count} lá»—i.\n"
+                f"- DÃ²ng lá»—i Ä‘áº§u tiÃªn: {first_error.segment_index + 1}\n"
                 f"- {first_error.message}\n"
-                "- Hãy sửa trong tab Phụ đề rồi thử lại."
+                "- HÃ£y sá»­a trong tab Phá»¥ Ä‘á» rá»“i thá»­ láº¡i."
             ),
         )
         return False
@@ -1456,9 +1485,9 @@ class MainWindow(QMainWindow):
 
     def _current_mixdown_inputs(self) -> tuple[float, float, Path | None, float] | None:
         try:
-            original_volume = self._parse_volume_value(self._original_volume_input.text(), field_name="Âm lượng audio gốc")
-            voice_volume = self._parse_volume_value(self._voice_volume_input.text(), field_name="Âm lượng giọng")
-            bgm_volume = self._parse_volume_value(self._bgm_volume_input.text(), field_name="Âm lượng BGM")
+            original_volume = self._parse_volume_value(self._original_volume_input.text(), field_name="Ã‚m lÆ°á»£ng audio gá»‘c")
+            voice_volume = self._parse_volume_value(self._voice_volume_input.text(), field_name="Ã‚m lÆ°á»£ng giá»ng")
+            bgm_volume = self._parse_volume_value(self._bgm_volume_input.text(), field_name="Ã‚m lÆ°á»£ng BGM")
         except ValueError:
             return None
         return original_volume, voice_volume, self._resolve_bgm_path(), bgm_volume
@@ -1472,9 +1501,9 @@ class MainWindow(QMainWindow):
         if mixdown_inputs is not None:
             return mixdown_inputs
         try:
-            self._parse_volume_value(self._original_volume_input.text(), field_name="Âm lượng audio gốc")
-            self._parse_volume_value(self._voice_volume_input.text(), field_name="Âm lượng giọng")
-            self._parse_volume_value(self._bgm_volume_input.text(), field_name="Âm lượng BGM")
+            self._parse_volume_value(self._original_volume_input.text(), field_name="Ã‚m lÆ°á»£ng audio gá»‘c")
+            self._parse_volume_value(self._voice_volume_input.text(), field_name="Ã‚m lÆ°á»£ng giá»ng")
+            self._parse_volume_value(self._bgm_volume_input.text(), field_name="Ã‚m lÆ°á»£ng BGM")
         except ValueError as exc:
             QMessageBox.warning(self, dialog_title, str(exc))
         return None
@@ -1521,13 +1550,13 @@ class MainWindow(QMainWindow):
         preset: object,
         total_duration_ms: int,
         require_localized: bool,
-        segment_voice_preset_ids: dict[str, str] | None = None,
+        segment_voice_presets: dict[str, object] | None = None,
     ) -> tuple[Path | None, list[int]]:
         tts_stage_hash = build_tts_stage_hash(
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
-            segment_voice_preset_ids=segment_voice_preset_ids,
+            segment_voice_presets=segment_voice_presets,
         )
         cached = load_synthesized_segments(workspace, tts_stage_hash)
         if not cached:
@@ -1588,7 +1617,7 @@ class MainWindow(QMainWindow):
 
     def _export_live_preview_ass_from_editor(self) -> Path:
         if not self._current_workspace:
-            raise ValueError("Chưa có dự án")
+            raise ValueError("ChÆ°a cÃ³ dá»± Ã¡n")
         rows = self._collect_subtitle_table_rows()
         ass_path = export_preview_subtitles(
             self._current_workspace,
@@ -1606,16 +1635,16 @@ class MainWindow(QMainWindow):
             ass_path = self._export_live_preview_ass_from_editor()
             self._preview_controller.reload_subtitles(ass_path)
         except ValueError:
-            self._subtitle_editor_status.setText("mpv đang chờ phụ đề hợp lệ trước khi tự nạp lại")
+            self._subtitle_editor_status.setText("mpv Ä‘ang chá» phá»¥ Ä‘á» há»£p lá»‡ trÆ°á»›c khi tá»± náº¡p láº¡i")
             return
         except (PreviewUnavailableError, FileNotFoundError, RuntimeError) as exc:
             self._cancel_preview_reload()
             self._live_preview_ass_path = None
-            self._subtitle_editor_status.setText(f"Đã dừng tự nạp lại preview mpv: {exc}")
-            self._append_log_line(f"Tự nạp lại preview mpv thất bại: {exc}")
+            self._subtitle_editor_status.setText(f"ÄÃ£ dá»«ng tá»± náº¡p láº¡i preview mpv: {exc}")
+            self._append_log_line(f"Tá»± náº¡p láº¡i preview mpv tháº¥t báº¡i: {exc}")
             return
 
-        self._subtitle_editor_status.setText("Đã nạp lại preview mpv từ trình biên tập phụ đề")
+        self._subtitle_editor_status.setText("ÄÃ£ náº¡p láº¡i preview mpv tá»« trÃ¬nh biÃªn táº­p phá»¥ Ä‘á»")
 
     def _ensure_editable_subtitle_track(
         self,
@@ -1625,16 +1654,16 @@ class MainWindow(QMainWindow):
         if str(active_track["kind"]) != CANONICAL_SUBTITLE_TRACK_KIND:
             return active_track, False
         if not self._current_workspace:
-            raise ValueError("Chưa có dự án")
+            raise ValueError("ChÆ°a cÃ³ dá»± Ã¡n")
 
         now = utc_now_iso()
         forked_track = database.create_subtitle_track(
             SubtitleTrackRecord(
                 track_id=f"{self._current_workspace.project_id}:user:{uuid4()}",
                 project_id=self._current_workspace.project_id,
-                name="Bản phụ đề chỉnh sửa",
+                name="Báº£n phá»¥ Ä‘á» chá»‰nh sá»­a",
                 kind=USER_SUBTITLE_TRACK_KIND,
-                notes="Được tách từ track phụ đề chuẩn khi lưu chỉnh sửa từ trình biên tập.",
+                notes="ÄÆ°á»£c tÃ¡ch tá»« track phá»¥ Ä‘á» chuáº©n khi lÆ°u chá»‰nh sá»­a tá»« trÃ¬nh biÃªn táº­p.",
                 created_at=now,
                 updated_at=now,
             ),
@@ -1647,7 +1676,7 @@ class MainWindow(QMainWindow):
         root_dir = Path(self._project_root_input.text()).expanduser()
         source_video_path = self._resolve_source_video_path()
         request = ProjectInitRequest(
-            name=self._project_name_input.text().strip() or "Dự án mới",
+            name=self._project_name_input.text().strip() or "Dá»± Ã¡n má»›i",
             root_dir=root_dir,
             source_language=self._source_lang_combo.currentText(),
             target_language=self._target_lang_combo.currentText(),
@@ -1656,19 +1685,19 @@ class MainWindow(QMainWindow):
         try:
             workspace = bootstrap_project(request)
         except FileExistsError as exc:
-            QMessageBox.warning(self, "Không thể tạo dự án", str(exc))
+            QMessageBox.warning(self, "KhÃ´ng thá»ƒ táº¡o dá»± Ã¡n", str(exc))
             return
         self._set_current_workspace(workspace)
-        QMessageBox.information(self, "Thành công", f"Đã tạo dự án tại:\n{workspace.root_dir}")
+        QMessageBox.information(self, "ThÃ nh cÃ´ng", f"ÄÃ£ táº¡o dá»± Ã¡n táº¡i:\n{workspace.root_dir}")
 
     def _open_project(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Mở thư mục dự án")
+        directory = QFileDialog.getExistingDirectory(self, "Má»Ÿ thÆ° má»¥c dá»± Ã¡n")
         if not directory:
             return
         try:
             workspace = open_project(Path(directory))
         except FileNotFoundError as exc:
-            QMessageBox.warning(self, "Không thể mở dự án", str(exc))
+            QMessageBox.warning(self, "KhÃ´ng thá»ƒ má»Ÿ dá»± Ã¡n", str(exc))
             return
         self._set_current_workspace(workspace)
 
@@ -1692,18 +1721,18 @@ class MainWindow(QMainWindow):
         self._reload_export_presets()
         self._reload_watermark_profiles()
         self._project_summary.setText(
-            "Dự án hiện tại:\n"
-            f"- Tên: {workspace.name}\n"
-            f"- Thư mục: {workspace.root_dir}\n"
+            "Dá»± Ã¡n hiá»‡n táº¡i:\n"
+            f"- TÃªn: {workspace.name}\n"
+            f"- ThÆ° má»¥c: {workspace.root_dir}\n"
             f"- CSDL: {workspace.database_path}\n"
             f"- Cache: {workspace.cache_dir}\n"
-            f"- Xuất bản: {workspace.exports_dir}"
+            f"- Xuáº¥t báº£n: {workspace.exports_dir}"
         )
         self._refresh_workspace_views()
         self._logs_info.setText(
-            f"Dữ liệu ứng dụng: {get_appdata_dir()}\nNhật ký dự án: {workspace.logs_dir}"
+            f"Dá»¯ liá»‡u á»©ng dá»¥ng: {get_appdata_dir()}\nNháº­t kÃ½ dá»± Ã¡n: {workspace.logs_dir}"
         )
-        self._append_log_line(f"Mở workspace: {workspace.root_dir}")
+        self._append_log_line(f"Má»Ÿ workspace: {workspace.root_dir}")
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION} - {workspace.name}")
         self._reload_subtitle_editor_from_db(force=True)
         self._reload_review_queue()
@@ -1724,14 +1753,14 @@ class MainWindow(QMainWindow):
 
     def _workflow_stage_label(self, stage: str) -> str:
         labels = {
-            "probe_media": "Đọc metadata",
-            "extract_audio": "Tách âm thanh",
+            "probe_media": "Äá»c metadata",
+            "extract_audio": "TÃ¡ch Ã¢m thanh",
             "asr": "ASR",
-            "translate": "Dịch",
+            "translate": "Dá»‹ch",
             "tts": "TTS",
-            "voice_track": "Tạo track giọng",
-            "mixdown": "Trộn âm thanh",
-            "export_video": "Xuất video",
+            "voice_track": "Táº¡o track giá»ng",
+            "mixdown": "Trá»™n Ã¢m thanh",
+            "export_video": "Xuáº¥t video",
         }
         return labels.get(stage, stage)
 
@@ -1754,18 +1783,18 @@ class MainWindow(QMainWindow):
             return
         if self._workflow_current_stage:
             remaining = ", ".join(self._workflow_stage_label(stage) for stage in self._workflow_queue)
-            tail = f"\n- Còn lại: {remaining}" if remaining else ""
+            tail = f"\n- CÃ²n láº¡i: {remaining}" if remaining else ""
             self._workflow_status.setText(
-                f"Quy trình nhanh: đang chạy {self._workflow_name or '-'}\n"
-                f"- Bước hiện tại: {self._workflow_stage_label(self._workflow_current_stage)}"
+                f"Quy trÃ¬nh nhanh: Ä‘ang cháº¡y {self._workflow_name or '-'}\n"
+                f"- BÆ°á»›c hiá»‡n táº¡i: {self._workflow_stage_label(self._workflow_current_stage)}"
                 f"{tail}"
             )
             return
-        self._workflow_status.setText("Quy trình nhanh: sẵn sàng")
+        self._workflow_status.setText("Quy trÃ¬nh nhanh: sáºµn sÃ ng")
 
     def _start_workflow(self, stages: list[str], *, workflow_name: str) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         if not stages:
             return
@@ -1773,7 +1802,7 @@ class MainWindow(QMainWindow):
         self._workflow_current_stage = None
         self._workflow_current_job_id = None
         self._workflow_name = workflow_name
-        self._append_log_line(f"Khởi động quy trình nhanh: {workflow_name}")
+        self._append_log_line(f"Khá»Ÿi Ä‘á»™ng quy trÃ¬nh nhanh: {workflow_name}")
         self._run_next_workflow_stage()
 
     def _run_next_workflow_stage(self) -> None:
@@ -1781,7 +1810,7 @@ class MainWindow(QMainWindow):
             self._workflow_current_stage = None
             self._workflow_current_job_id = None
             self._update_workflow_status_label(
-                f"Quy trình nhanh: đã hoàn tất {self._workflow_name or 'quy trình'}"
+                f"Quy trÃ¬nh nhanh: Ä‘Ã£ hoÃ n táº¥t {self._workflow_name or 'quy trÃ¬nh'}"
             )
             self._workflow_name = None
             return
@@ -1790,7 +1819,7 @@ class MainWindow(QMainWindow):
         runner = self._workflow_stage_runner(next_stage)
         if runner is None:
             self._stop_workflow(
-                message=f"Quy trình nhanh đã dừng: không tìm thấy tác vụ xử lý cho bước {next_stage}",
+                message=f"Quy trÃ¬nh nhanh Ä‘Ã£ dá»«ng: khÃ´ng tÃ¬m tháº¥y tÃ¡c vá»¥ xá»­ lÃ½ cho bÆ°á»›c {next_stage}",
             )
             return
 
@@ -1798,8 +1827,8 @@ class MainWindow(QMainWindow):
         if not job_id:
             self._stop_workflow(
                 message=(
-                    f"Quy trình nhanh đã dừng ở bước {self._workflow_stage_label(next_stage)}. "
-                    "Hãy bổ sung dữ liệu hoặc cấu hình rồi chạy lại."
+                    f"Quy trÃ¬nh nhanh Ä‘Ã£ dá»«ng á»Ÿ bÆ°á»›c {self._workflow_stage_label(next_stage)}. "
+                    "HÃ£y bá»• sung dá»¯ liá»‡u hoáº·c cáº¥u hÃ¬nh rá»“i cháº¡y láº¡i."
                 ),
             )
             return
@@ -1819,7 +1848,7 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._run_next_workflow_stage)
         else:
             self._update_workflow_status_label(
-                f"Quy trình nhanh: đã hoàn tất {self._workflow_name or 'quy trình'}"
+                f"Quy trÃ¬nh nhanh: Ä‘Ã£ hoÃ n táº¥t {self._workflow_name or 'quy trÃ¬nh'}"
             )
             self._workflow_name = None
 
@@ -1836,17 +1865,17 @@ class MainWindow(QMainWindow):
         self._workflow_current_job_id = None
         self._workflow_name = None
         if update_status:
-            self._update_workflow_status_label(message or "Quy trình nhanh: đã dừng hàng đợi hiện tại")
+            self._update_workflow_status_label(message or "Quy trÃ¬nh nhanh: Ä‘Ã£ dá»«ng hÃ ng Ä‘á»£i hiá»‡n táº¡i")
 
     def _reload_subtitle_editor_from_db(self, *, force: bool = False) -> None:
         if not self._current_workspace:
             self._subtitle_table.setRowCount(0)
             self._subtitle_segment_snapshot = {}
             self._subtitle_editor_dirty = False
-            self._subtitle_editor_status.setText("Chưa mở dự án")
+            self._subtitle_editor_status.setText("ChÆ°a má»Ÿ dá»± Ã¡n")
             return
         if self._subtitle_editor_dirty and not force:
-            self._subtitle_editor_status.setText("Trình biên tập có thay đổi chưa lưu. Hãy lưu hoặc nạp lại thủ công.")
+            self._subtitle_editor_status.setText("TrÃ¬nh biÃªn táº­p cÃ³ thay Ä‘á»•i chÆ°a lÆ°u. HÃ£y lÆ°u hoáº·c náº¡p láº¡i thá»§ cÃ´ng.")
             return
 
         _database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
@@ -1866,7 +1895,7 @@ class MainWindow(QMainWindow):
         self._subtitle_editor_dirty = False
         self._clear_subtitle_qc_ui()
         self._subtitle_editor_status.setText(
-            f"Đã nạp {len(subtitle_rows)} dòng từ {self._subtitle_track_label(active_track)} vào trình biên tập"
+            f"ÄÃ£ náº¡p {len(subtitle_rows)} dÃ²ng tá»« {self._subtitle_track_label(active_track)} vÃ o trÃ¬nh biÃªn táº­p"
         )
         if subtitle_rows:
             self._schedule_preview_reload()
@@ -1874,7 +1903,7 @@ class MainWindow(QMainWindow):
     def _handle_subtitle_item_changed(self, _item: QTableWidgetItem) -> None:
         if self._subtitle_editor_loading:
             return
-        self._mark_subtitle_editor_dirty("Trình biên tập có thay đổi chưa lưu")
+        self._mark_subtitle_editor_dirty("TrÃ¬nh biÃªn táº­p cÃ³ thay Ä‘á»•i chÆ°a lÆ°u")
 
     def _collect_subtitle_table_rows(self) -> list[dict[str, object]]:
         rows: list[dict[str, object]] = []
@@ -1888,7 +1917,7 @@ class MainWindow(QMainWindow):
             start_ms = parse_timestamp_ms(self._subtitle_table.item(row_index, 1).text())
             end_ms = parse_timestamp_ms(self._subtitle_table.item(row_index, 2).text())
             if end_ms <= start_ms:
-                raise ValueError(f"Dòng {row_index + 1}: thời gian kết thúc phải lớn hơn thời gian bắt đầu.")
+                raise ValueError(f"DÃ²ng {row_index + 1}: thá»i gian káº¿t thÃºc pháº£i lá»›n hÆ¡n thá»i gian báº¯t Ä‘áº§u.")
             row_payload = dict(payload)
             row_payload.update(
                 {
@@ -1928,7 +1957,7 @@ class MainWindow(QMainWindow):
 
     def _clear_subtitle_qc_ui(self) -> None:
         self._subtitle_qc_report = SubtitleQcReport(total_segments=0, issues=[])
-        self._subtitle_qc_summary.setText("QC phụ đề chưa được chạy")
+        self._subtitle_qc_summary.setText("QC phá»¥ Ä‘á» chÆ°a Ä‘Æ°á»£c cháº¡y")
         self._subtitle_qc_table.setRowCount(0)
         blocker = QSignalBlocker(self._subtitle_table)
         try:
@@ -1944,12 +1973,12 @@ class MainWindow(QMainWindow):
         self._subtitle_qc_report = report
         issue_count = len(report.issues)
         self._subtitle_qc_summary.setText(
-            "QC phụ đề:\n"
-            f"- Tổng số dòng: {report.total_segments}\n"
-            f"- Lỗi: {report.error_count}\n"
-            f"- Cảnh báo: {report.warning_count}\n"
-            f"- Dòng đạt chuẩn: {report.ok_count}\n"
-            "- Luật mặc định: tối đa 2 dòng, 42 CPL, 18 CPS, thời lượng 800-7000 ms"
+            "QC phá»¥ Ä‘á»:\n"
+            f"- Tá»•ng sá»‘ dÃ²ng: {report.total_segments}\n"
+            f"- Lá»—i: {report.error_count}\n"
+            f"- Cáº£nh bÃ¡o: {report.warning_count}\n"
+            f"- DÃ²ng Ä‘áº¡t chuáº©n: {report.ok_count}\n"
+            "- Luáº­t máº·c Ä‘á»‹nh: tá»‘i Ä‘a 2 dÃ²ng, 42 CPL, 18 CPS, thá»i lÆ°á»£ng 800-7000 ms"
         )
         self._subtitle_qc_table.setRowCount(issue_count)
 
@@ -1988,12 +2017,12 @@ class MainWindow(QMainWindow):
         try:
             rows = self._collect_subtitle_table_rows()
         except ValueError as exc:
-            QMessageBox.warning(self, "QC phụ đề", str(exc))
+            QMessageBox.warning(self, "QC phá»¥ Ä‘á»", str(exc))
             return
         report = analyze_subtitle_rows(rows, config=SubtitleQcConfig())
         self._apply_qc_report_to_ui(report)
         self._append_log_line(
-            f"QC phụ đề: {report.error_count} lỗi, {report.warning_count} cảnh báo, {report.total_segments} dòng"
+            f"QC phá»¥ Ä‘á»: {report.error_count} lá»—i, {report.warning_count} cáº£nh bÃ¡o, {report.total_segments} dÃ²ng"
         )
 
     def _apply_shift_to_subtitle_rows(self) -> None:
@@ -2002,7 +2031,7 @@ class MainWindow(QMainWindow):
         try:
             shift_ms = int(self._shift_input.text().strip() or "0")
         except ValueError:
-            QMessageBox.warning(self, "Biên tập phụ đề", "Độ dịch (ms) phải là số nguyên.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "Äá»™ dá»‹ch (ms) pháº£i lÃ  sá»‘ nguyÃªn.")
             return
 
         self._subtitle_editor_loading = True
@@ -2015,13 +2044,13 @@ class MainWindow(QMainWindow):
             self._subtitle_table.item(row_index, 2).setText(format_timestamp_ms(new_end))
         self._subtitle_editor_loading = False
         self._mark_subtitle_editor_dirty(
-            f"Đã dịch toàn bộ mốc thời gian {shift_ms} ms. Hãy lưu để ghi vào CSDL."
+            f"ÄÃ£ dá»‹ch toÃ n bá»™ má»‘c thá»i gian {shift_ms} ms. HÃ£y lÆ°u Ä‘á»ƒ ghi vÃ o CSDL."
         )
 
     def _apply_find_replace(self) -> None:
         needle = self._find_input.text()
         if not needle:
-            QMessageBox.warning(self, "Biên tập phụ đề", "Hãy nhập chuỗi cần tìm.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "HÃ£y nháº­p chuá»—i cáº§n tÃ¬m.")
             return
         replacement = self._replace_input.text()
         target = self._replace_target_combo.currentData()
@@ -2046,10 +2075,10 @@ class MainWindow(QMainWindow):
                     item.setText(updated_text)
         self._subtitle_editor_loading = False
         if replacement_count == 0:
-            self._subtitle_editor_status.setText("Không tìm thấy chuỗi cần thay trong trình biên tập")
+            self._subtitle_editor_status.setText("KhÃ´ng tÃ¬m tháº¥y chuá»—i cáº§n thay trong trÃ¬nh biÃªn táº­p")
             return
         self._mark_subtitle_editor_dirty(
-            f"Đã thay {replacement_count} lượt. Hãy lưu để ghi vào CSDL."
+            f"ÄÃ£ thay {replacement_count} lÆ°á»£t. HÃ£y lÆ°u Ä‘á»ƒ ghi vÃ o CSDL."
         )
 
     def _selected_subtitle_start_ms(self) -> int:
@@ -2063,24 +2092,24 @@ class MainWindow(QMainWindow):
 
     def _preview_subtitles(self, *, start_from_selected: bool) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "Biên tập phụ đề", "Không thể lưu chỉnh sửa phụ đề trước khi xem trước.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi xem trÆ°á»›c.")
             return
 
         workspace = self._current_workspace
         source_video_path = self._resolve_source_video_path()
         if not source_video_path:
-            QMessageBox.warning(self, "Chưa có video", "Hãy chọn video nguồn hợp lệ.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ video", "HÃ£y chá»n video nguá»“n há»£p lá»‡.")
             return
         if not self._selected_export_preset():
-            QMessageBox.warning(self, "Preset xuất", "Không tìm thấy preset xuất trong dự án.")
+            QMessageBox.warning(self, "Preset xuáº¥t", "KhÃ´ng tÃ¬m tháº¥y preset xuáº¥t trong dá»± Ã¡n.")
             return
 
         _database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR và dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR vÃ  dá»‹ch trÆ°á»›c.")
             return
 
         try:
@@ -2095,13 +2124,13 @@ class MainWindow(QMainWindow):
                 start_ms=self._selected_subtitle_start_ms() if start_from_selected else 0,
             )
         except (PreviewUnavailableError, FileNotFoundError, RuntimeError) as exc:
-            QMessageBox.warning(self, "Xem trước mpv", str(exc))
+            QMessageBox.warning(self, "Xem trÆ°á»›c mpv", str(exc))
             return
 
         self._subtitle_editor_status.setText(
-            "Đang mở preview mpv cho "
+            "Äang má»Ÿ preview mpv cho "
             f"{self._subtitle_track_label(active_track)}"
-            + (" từ dòng đang chọn" if start_from_selected else " từ đầu video")
+            + (" tá»« dÃ²ng Ä‘ang chá»n" if start_from_selected else " tá»« Ä‘áº§u video")
         )
         self._refresh_workspace_views()
         self._append_log_line(f"Mo preview mpv voi ASS: {ass_path}")
@@ -2110,17 +2139,17 @@ class MainWindow(QMainWindow):
         del checked
         if not self._current_workspace:
             if not silent:
-                QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+                QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return False
         if not self._subtitle_editor_dirty:
-            self._subtitle_editor_status.setText("Không có thay đổi cần lưu")
+            self._subtitle_editor_status.setText("KhÃ´ng cÃ³ thay Ä‘á»•i cáº§n lÆ°u")
             return True
 
         try:
             rows = self._collect_subtitle_table_rows()
         except ValueError as exc:
             if not silent:
-                QMessageBox.warning(self, "Biên tập phụ đề", str(exc))
+                QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", str(exc))
             return False
         downstream_artifacts_stale = self._subtitle_rows_changed_since_snapshot(rows)
         if downstream_artifacts_stale:
@@ -2149,17 +2178,17 @@ class MainWindow(QMainWindow):
         self._refresh_workspace_views()
         track_label = self._subtitle_track_label(active_track)
         if forked_from_canonical:
-            self._append_log_line(f"Đã tách track phụ đề chuẩn sang track chỉnh sửa: {track_label}")
-        self._append_log_line(f"Đã lưu track phụ đề {track_label} với {len(records)} dòng vào CSDL")
+            self._append_log_line(f"ÄÃ£ tÃ¡ch track phá»¥ Ä‘á» chuáº©n sang track chá»‰nh sá»­a: {track_label}")
+        self._append_log_line(f"ÄÃ£ lÆ°u track phá»¥ Ä‘á» {track_label} vá»›i {len(records)} dÃ²ng vÃ o CSDL")
         if downstream_artifacts_stale:
-            self._append_log_line("Đã xoá trạng thái TTS/track giọng/audio trộn cũ vì track phụ đề đã thay đổi.")
+            self._append_log_line("ÄÃ£ xoÃ¡ tráº¡ng thÃ¡i TTS/track giá»ng/audio trá»™n cÅ© vÃ¬ track phá»¥ Ä‘á» Ä‘Ã£ thay Ä‘á»•i.")
         if not silent:
             QMessageBox.information(
                 self,
-                "Biên tập phụ đề",
+                "BiÃªn táº­p phá»¥ Ä‘á»",
                 (
-                    f"Đã lưu track phụ đề {track_label} ({len(records)} dòng)."
-                    + (" Track chuẩn đã được tách thành track chỉnh sửa riêng." if forked_from_canonical else "")
+                    f"ÄÃ£ lÆ°u track phá»¥ Ä‘á» {track_label} ({len(records)} dÃ²ng)."
+                    + (" Track chuáº©n Ä‘Ã£ Ä‘Æ°á»£c tÃ¡ch thÃ nh track chá»‰nh sá»­a riÃªng." if forked_from_canonical else "")
                 ),
             )
         return True
@@ -2179,7 +2208,7 @@ class MainWindow(QMainWindow):
             if tts_item is not None and not tts_item.text().strip():
                 tts_item.setText(suggested)
         self._subtitle_editor_loading = False
-        self._mark_subtitle_editor_dirty("Đã chép bản dịch sang cột phụ đề. Hãy lưu để ghi vào CSDL.")
+        self._mark_subtitle_editor_dirty("ÄÃ£ chÃ©p báº£n dá»‹ch sang cá»™t phá»¥ Ä‘á». HÃ£y lÆ°u Ä‘á»ƒ ghi vÃ o CSDL.")
 
     def _apply_subtitle_to_tts(self) -> None:
         if self._subtitle_table.rowCount() == 0:
@@ -2200,10 +2229,10 @@ class MainWindow(QMainWindow):
         self._subtitle_editor_loading = False
         if updated_count:
             self._mark_subtitle_editor_dirty(
-                f"Đã tạo Lời TTS từ phụ đề cho {updated_count} dòng. Hãy lưu để ghi vào CSDL."
+                f"ÄÃ£ táº¡o Lá»i TTS tá»« phá»¥ Ä‘á» cho {updated_count} dÃ²ng. HÃ£y lÆ°u Ä‘á»ƒ ghi vÃ o CSDL."
             )
         else:
-            self._subtitle_editor_status.setText("Lời TTS hiện tại đã khớp với phụ đề hoặc chưa có nội dung để tạo.")
+            self._subtitle_editor_status.setText("Lá»i TTS hiá»‡n táº¡i Ä‘Ã£ khá»›p vá»›i phá»¥ Ä‘á» hoáº·c chÆ°a cÃ³ ná»™i dung Ä‘á»ƒ táº¡o.")
 
     def _polish_tts_texts(self) -> None:
         if self._subtitle_table.rowCount() == 0:
@@ -2229,17 +2258,17 @@ class MainWindow(QMainWindow):
         self._subtitle_editor_loading = False
         if updated_count:
             self._mark_subtitle_editor_dirty(
-                f"Đã làm mượt Lời TTS cho {updated_count} dòng. Hãy lưu để ghi vào CSDL."
+                f"ÄÃ£ lÃ m mÆ°á»£t Lá»i TTS cho {updated_count} dÃ²ng. HÃ£y lÆ°u Ä‘á»ƒ ghi vÃ o CSDL."
             )
         else:
-            self._subtitle_editor_status.setText("Không có Lời TTS nào cần làm mượt thêm.")
+            self._subtitle_editor_status.setText("KhÃ´ng cÃ³ Lá»i TTS nÃ o cáº§n lÃ m mÆ°á»£t thÃªm.")
 
     def _choose_bgm_file(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn tệp BGM",
+            "Chá»n tá»‡p BGM",
             str(Path.cwd()),
-            "Tệp âm thanh (*.wav *.mp3 *.m4a *.aac *.flac *.ogg);;Tất cả tệp (*.*)",
+            "Tá»‡p Ã¢m thanh (*.wav *.mp3 *.m4a *.aac *.flac *.ogg);;Táº¥t cáº£ tá»‡p (*.*)",
         )
         if file_path:
             self._bgm_path_input.setText(file_path)
@@ -2248,9 +2277,9 @@ class MainWindow(QMainWindow):
         initial_dir = self._current_workspace.root_dir if self._current_workspace else Path.cwd()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn audio mẫu cho VieNeu clone",
+            "Chá»n audio máº«u cho VieNeu clone",
             str(initial_dir),
-            "Tệp âm thanh (*.wav *.mp3 *.m4a *.aac *.flac *.ogg);;Tất cả tệp (*.*)",
+            "Tá»‡p Ã¢m thanh (*.wav *.mp3 *.m4a *.aac *.flac *.ogg);;Táº¥t cáº£ tá»‡p (*.*)",
         )
         if file_path:
             self._vieneu_ref_audio_input.setText(file_path)
@@ -2260,9 +2289,9 @@ class MainWindow(QMainWindow):
         initial_dir = self._current_workspace.root_dir if self._current_workspace else Path.cwd()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Chọn watermark hoặc logo",
+            "Chá»n watermark hoáº·c logo",
             str(initial_dir),
-            "Tệp ảnh (*.png *.webp *.jpg *.jpeg);;Tất cả tệp (*.*)",
+            "Tá»‡p áº£nh (*.png *.webp *.jpg *.jpeg);;Táº¥t cáº£ tá»‡p (*.*)",
         )
         if file_path:
             self._watermark_path_input.setText(file_path)
@@ -2276,7 +2305,7 @@ class MainWindow(QMainWindow):
             self._voice_combo.clear()
             self._voice_combo.blockSignals(blocked)
             self._vieneu_environment = detect_vieneu_installation()
-            self._voice_info.setText("Runtime giọng đọc: chưa mở dự án")
+            self._voice_info.setText("Runtime giá»ng Ä‘á»c: chÆ°a má»Ÿ dá»± Ã¡n")
             self._sync_voice_preset_form()
             self._reload_speaker_bindings()
             self._reload_voice_policies()
@@ -2302,21 +2331,21 @@ class MainWindow(QMainWindow):
 
         voice_lines = []
         if self._installed_sapi_voices:
-            voice_lines.append("Giọng SAPI đã phát hiện:")
+            voice_lines.append("Giá»ng SAPI Ä‘Ã£ phÃ¡t hiá»‡n:")
             voice_lines.extend(f"- {name}" for name in self._installed_sapi_voices)
         else:
-            voice_lines.append("Giọng SAPI đã phát hiện: không đọc được hoặc hệ thống chưa có giọng")
+            voice_lines.append("Giá»ng SAPI Ä‘Ã£ phÃ¡t hiá»‡n: khÃ´ng Ä‘á»c Ä‘Æ°á»£c hoáº·c há»‡ thá»‘ng chÆ°a cÃ³ giá»ng")
         version_suffix = (
             f" v{self._vieneu_environment.package_version}" if self._vieneu_environment.package_version else ""
         )
         if self._vieneu_environment.package_installed:
-            voice_lines.append(f"VieNeu SDK{version_suffix}: đã cài")
+            voice_lines.append(f"VieNeu SDK{version_suffix}: Ä‘Ã£ cÃ i")
         else:
-            voice_lines.append("VieNeu SDK: chưa cài package `vieneu`")
+            voice_lines.append("VieNeu SDK: chÆ°a cÃ i package `vieneu`")
         if self._vieneu_environment.espeak_path:
             voice_lines.append(f"eSpeak NG: {self._vieneu_environment.espeak_path}")
         else:
-            voice_lines.append("eSpeak NG: chưa tìm thấy, VieNeu local sẽ chưa chạy được")
+            voice_lines.append("eSpeak NG: chÆ°a tÃ¬m tháº¥y, VieNeu local sáº½ chÆ°a cháº¡y Ä‘Æ°á»£c")
         self._voice_info.setText("\n".join(voice_lines))
         self._sync_voice_preset_form()
         self._reload_speaker_bindings()
@@ -2496,14 +2525,14 @@ class MainWindow(QMainWindow):
                 "language": language or None,
                 "sample_rate": self._parse_voice_int_value(
                     self._voice_sample_rate_input.text(),
-                    field_name="Tần số mẫu",
+                    field_name="Táº§n sá»‘ máº«u",
                     minimum=8000,
                     default=preset.sample_rate or 24000,
                     strict=strict,
                 ),
                 "speed": self._parse_voice_float_value(
                     self._voice_speed_profile_input.text(),
-                    field_name="Tốc độ",
+                    field_name="Tá»‘c Ä‘á»™",
                     minimum=0.1,
                     maximum=4.0,
                     default=preset.speed or 1.0,
@@ -2511,7 +2540,7 @@ class MainWindow(QMainWindow):
                 ),
                 "volume": self._parse_voice_float_value(
                     self._voice_profile_volume_input.text(),
-                    field_name="Âm lượng giọng",
+                    field_name="Ã‚m lÆ°á»£ng giá»ng",
                     minimum=0.0,
                     maximum=4.0,
                     default=preset.volume or 1.0,
@@ -2519,7 +2548,7 @@ class MainWindow(QMainWindow):
                 ),
                 "pitch": self._parse_voice_float_value(
                     self._voice_pitch_input.text(),
-                    field_name="Cao độ",
+                    field_name="Cao Ä‘á»™",
                     minimum=-24.0,
                     maximum=24.0,
                     default=preset.pitch or 0.0,
@@ -2542,7 +2571,7 @@ class MainWindow(QMainWindow):
     def _handle_voice_profile_form_changed(self, *_args) -> None:
         preset = self._base_selected_voice_preset()
         if preset is None:
-            self._voice_profile_status.setText("Chưa có preset giọng để chỉnh sửa")
+            self._voice_profile_status.setText("ChÆ°a cÃ³ preset giá»ng Ä‘á»ƒ chá»‰nh sá»­a")
             return
         engine = str(self._voice_engine_combo.currentData() or preset.engine or "sapi").lower()
         is_vieneu = engine == "vieneu"
@@ -2555,9 +2584,9 @@ class MainWindow(QMainWindow):
         if engine == "vieneu":
             self._handle_voice_clone_form_changed()
         else:
-            self._voice_clone_status.setText("Preset này không dùng chế độ VieNeu clone")
+            self._voice_clone_status.setText("Preset nÃ y khÃ´ng dÃ¹ng cháº¿ Ä‘á»™ VieNeu clone")
         self._voice_profile_status.setText(
-            f"Đang sửa preset {preset.name}. Bấm 'Lưu preset' hoặc 'Lưu thành bản mới' để áp dụng."
+            f"Äang sá»­a preset {preset.name}. Báº¥m 'LÆ°u preset' hoáº·c 'LÆ°u thÃ nh báº£n má»›i' Ä‘á»ƒ Ã¡p dá»¥ng."
         )
         if self._current_workspace:
             self._refresh_workspace_views()
@@ -2580,25 +2609,25 @@ class MainWindow(QMainWindow):
                 candidate = self._current_workspace.root_dir / candidate
             resolved_audio_path = candidate.resolve()
         if ref_audio_path and resolved_audio_path and not resolved_audio_path.exists():
-            self._voice_clone_status.setText(f"Không tìm thấy audio mẫu clone: {resolved_audio_path} ({mode})")
+            self._voice_clone_status.setText(f"KhÃ´ng tÃ¬m tháº¥y audio máº«u clone: {resolved_audio_path} ({mode})")
         elif ref_audio_path and ref_text:
             transcript_size = len(ref_text.split())
             self._voice_clone_status.setText(
-                f"Clone sẵn sàng ({mode}) - mẫu {transcript_size} từ"
+                f"Clone sáºµn sÃ ng ({mode}) - máº«u {transcript_size} tá»«"
             )
         elif ref_audio_path:
-            self._voice_clone_status.setText(f"Đã có audio mẫu, cần thêm văn bản mẫu đúng 100% ({mode})")
+            self._voice_clone_status.setText(f"ÄÃ£ cÃ³ audio máº«u, cáº§n thÃªm vÄƒn báº£n máº«u Ä‘Ãºng 100% ({mode})")
         else:
             self._voice_clone_status.setText(
-                f"Clone chưa được cấu hình ({mode}). Gợi ý: dùng audio sạch 10-30 giây và transcript khớp tuyệt đối."
+                f"Clone chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh ({mode}). Gá»£i Ã½: dÃ¹ng audio sáº¡ch 10-30 giÃ¢y vÃ  transcript khá»›p tuyá»‡t Ä‘á»‘i."
             )
 
     def _sync_voice_preset_form(self) -> None:
         preset = self._base_selected_voice_preset()
         if not preset:
-            self._voice_preset_notes.setText("Chưa có preset giọng")
-            self._voice_profile_status.setText("Trình quản lý preset giọng chưa có preset")
-            self._voice_clone_status.setText("Preset clone chưa được cấu hình")
+            self._voice_preset_notes.setText("ChÆ°a cÃ³ preset giá»ng")
+            self._voice_profile_status.setText("TrÃ¬nh quáº£n lÃ½ preset giá»ng chÆ°a cÃ³ preset")
+            self._voice_clone_status.setText("Preset clone chÆ°a Ä‘Æ°á»£c cáº¥u hÃ¬nh")
             for widget in (
                 self._voice_profile_name_input,
                 self._voice_engine_combo,
@@ -2625,7 +2654,7 @@ class MainWindow(QMainWindow):
                 widget.setEnabled(False)
             return
 
-        self._voice_preset_notes.setText(preset.notes or "Không có ghi chú cho preset này")
+        self._voice_preset_notes.setText(preset.notes or "KhÃ´ng cÃ³ ghi chÃº cho preset nÃ y")
         is_vieneu = preset.engine.lower() == "vieneu"
         engine_options = dict(preset.engine_options)
         ref_audio_path = str(engine_options.get("ref_audio_path", "")) if is_vieneu else ""
@@ -2689,11 +2718,11 @@ class MainWindow(QMainWindow):
             widget.setEnabled(is_vieneu)
 
         if not is_vieneu:
-            self._voice_clone_status.setText("Preset này không dùng chế độ VieNeu clone")
+            self._voice_clone_status.setText("Preset nÃ y khÃ´ng dÃ¹ng cháº¿ Ä‘á»™ VieNeu clone")
         else:
             self._update_vieneu_clone_status(mode=str(mode))
         self._voice_profile_status.setText(
-            "Trình quản lý preset giọng đã sẵn sàng. Bạn có thể sửa, nhân bản, xóa hoặc nhập hàng loạt."
+            "TrÃ¬nh quáº£n lÃ½ preset giá»ng Ä‘Ã£ sáºµn sÃ ng. Báº¡n cÃ³ thá»ƒ sá»­a, nhÃ¢n báº£n, xÃ³a hoáº·c nháº­p hÃ ng loáº¡t."
         )
 
     def _character_name_map(self, database: ProjectDatabase) -> dict[str, str]:
@@ -2736,28 +2765,28 @@ class MainWindow(QMainWindow):
         preset_id = str(combo.currentData() or "").strip()
         preset_ids = available_preset_ids or {preset.voice_preset_id for preset in self._voice_presets}
         if not preset_id:
-            self._set_speaker_binding_row_status(row_index, status_text="Chưa gán", status_kind="unbound")
+            self._set_speaker_binding_row_status(row_index, status_text="ChÆ°a gÃ¡n", status_kind="unbound")
             return
-        if preset_id not in preset_ids:
+        if preset_id and preset_id not in preset_ids:
             self._set_speaker_binding_row_status(
                 row_index,
-                status_text="Preset đã gán không còn tồn tại",
+                status_text="Preset Ä‘Ã£ gÃ¡n khÃ´ng cÃ²n tá»“n táº¡i",
                 status_kind="missing",
             )
             return
         self._set_speaker_binding_row_status(
             row_index,
-            status_text="Đã gán preset riêng",
+            status_text="ÄÃ£ gÃ¡n preset riÃªng",
             status_kind="ok",
         )
 
     def _refresh_speaker_binding_status_summary(self) -> None:
         row_count = self._speaker_binding_table.rowCount()
         if not self._current_workspace:
-            self._speaker_binding_status.setText("Speaker binding: chưa mở dự án")
+            self._speaker_binding_status.setText("Speaker binding: chÆ°a má»Ÿ dá»± Ã¡n")
             return
         if row_count == 0:
-            self._speaker_binding_status.setText("Speaker binding: chưa có speaker từ Contextual V2")
+            self._speaker_binding_status.setText("Speaker binding: chÆ°a cÃ³ speaker tá»« Contextual V2")
             return
 
         bound_count = 0
@@ -2775,22 +2804,22 @@ class MainWindow(QMainWindow):
 
         if bound_count == 0:
             self._speaker_binding_status.setText(
-                f"Speaker binding: có {row_count} speaker nhận diện. Nếu chưa lưu binding nào, toàn bộ track sẽ dùng preset mặc định."
+                f"Speaker binding: cÃ³ {row_count} speaker nháº­n diá»‡n. Náº¿u chÆ°a lÆ°u binding nÃ o, toÃ n bá»™ track sáº½ dÃ¹ng preset máº·c Ä‘á»‹nh."
             )
             return
 
-        details: list[str] = [f"{bound_count}/{row_count} speaker đã có preset riêng."]
+        details: list[str] = [f"{bound_count}/{row_count} speaker Ä‘Ã£ cÃ³ preset riÃªng."]
         if missing_count:
-            details.append(f"{missing_count} binding đang trỏ tới preset không còn tồn tại.")
+            details.append(f"{missing_count} binding Ä‘ang trá» tá»›i preset khÃ´ng cÃ²n tá»“n táº¡i.")
         if unresolved_count:
-            details.append("TTS sẽ bị chặn cho đến khi gán đủ các speaker đã nhận diện.")
+            details.append("TTS sáº½ bá»‹ cháº·n cho Ä‘áº¿n khi gÃ¡n Ä‘á»§ cÃ¡c speaker Ä‘Ã£ nháº­n diá»‡n.")
         else:
-            details.append("Đã đủ binding cho các speaker đã nhận diện.")
+            details.append("ÄÃ£ Ä‘á»§ binding cho cÃ¡c speaker Ä‘Ã£ nháº­n diá»‡n.")
         self._speaker_binding_status.setText("Speaker binding: " + " ".join(details))
 
     def _set_speaker_binding_form_dirty(self, is_dirty: bool) -> None:
         self._speaker_binding_dirty = is_dirty
-        marker = " Form hiện có thay đổi chưa lưu."
+        marker = " Form hiá»‡n cÃ³ thay Ä‘á»•i chÆ°a lÆ°u."
         status_text = self._speaker_binding_status.text().strip()
         if status_text:
             if is_dirty and marker not in status_text:
@@ -2799,13 +2828,13 @@ class MainWindow(QMainWindow):
                 self._speaker_binding_status.setText(status_text.replace(marker, ""))
         if is_dirty:
             self._speaker_binding_hint.setText(
-                "Lưu ý: bạn đang có thay đổi speaker binding trên form nhưng chưa lưu. "
-                "TTS/export chỉ dùng mapping đã lưu trong dự án."
+                "LÆ°u Ã½: báº¡n Ä‘ang cÃ³ thay Ä‘á»•i speaker binding trÃªn form nhÆ°ng chÆ°a lÆ°u. "
+                "TTS/export chá»‰ dÃ¹ng mapping Ä‘Ã£ lÆ°u trong dá»± Ã¡n."
             )
         else:
             self._speaker_binding_hint.setText(
-                "Mẹo: nếu đã lưu ít nhất 1 speaker binding, mọi speaker nhận diện rõ trong track hiện tại "
-                "phải được gán preset. Speaker unknown vẫn dùng preset mặc định."
+                "Máº¹o: náº¿u Ä‘Ã£ lÆ°u Ã­t nháº¥t 1 speaker binding, má»i speaker nháº­n diá»‡n rÃµ trong track hiá»‡n táº¡i "
+                "pháº£i Ä‘Æ°á»£c gÃ¡n preset. Speaker unknown váº«n dÃ¹ng preset máº·c Ä‘á»‹nh."
             )
         self._sync_voice_summary_with_binding_form_state()
 
@@ -2816,15 +2845,15 @@ class MainWindow(QMainWindow):
         lines = [
             line
             for line in summary_text.splitlines()
-            if not line.startswith("- Speaker binding trên form:")
-            and not line.startswith("- Voice policy trên form:")
+            if not line.startswith("- Speaker binding trÃªn form:")
+            and not line.startswith("- Voice policy trÃªn form:")
         ]
         if self._speaker_binding_dirty and self._speaker_binding_table.rowCount() > 0:
-            lines.append("- Speaker binding trên form: có thay đổi chưa lưu; hãy bấm Lưu binding để áp dụng")
+            lines.append("- Speaker binding trÃªn form: cÃ³ thay Ä‘á»•i chÆ°a lÆ°u; hÃ£y báº¥m LÆ°u binding Ä‘á»ƒ Ã¡p dá»¥ng")
         if self._voice_policy_dirty and (
             self._character_voice_policy_table.rowCount() > 0 or self._relationship_voice_policy_table.rowCount() > 0
         ):
-            lines.append("- Voice policy trên form: có thay đổi chưa lưu; hãy bấm Lưu voice policy để áp dụng")
+            lines.append("- Voice policy trÃªn form: cÃ³ thay Ä‘á»•i chÆ°a lÆ°u; hÃ£y báº¥m LÆ°u voice policy Ä‘á»ƒ Ã¡p dá»¥ng")
         self._voice_summary.setText("\n".join(lines))
 
     def _handle_speaker_binding_selection_changed(self, row_index: int) -> None:
@@ -2837,7 +2866,7 @@ class MainWindow(QMainWindow):
     def _fill_unbound_speakers_with_selected_preset(self) -> None:
         preset_id = str(self._voice_combo.currentData() or "").strip()
         if not preset_id:
-            QMessageBox.warning(self, "Speaker binding", "Hãy chọn preset giọng mặc định trước.")
+            QMessageBox.warning(self, "Speaker binding", "HÃ£y chá»n preset giá»ng máº·c Ä‘á»‹nh trÆ°á»›c.")
             return
         changed = 0
         for row_index in range(self._speaker_binding_table.rowCount()):
@@ -2854,18 +2883,18 @@ class MainWindow(QMainWindow):
         self._refresh_speaker_binding_status_summary()
         if changed:
             self._set_speaker_binding_form_dirty(True)
-            self._append_log_line(f"Đã gán preset hiện tại cho {changed} speaker chưa có binding")
+            self._append_log_line(f"ÄÃ£ gÃ¡n preset hiá»‡n táº¡i cho {changed} speaker chÆ°a cÃ³ binding")
         else:
-            QMessageBox.information(self, "Speaker binding", "Không có speaker trống nào để gán nhanh.")
+            QMessageBox.information(self, "Speaker binding", "KhÃ´ng cÃ³ speaker trá»‘ng nÃ o Ä‘á»ƒ gÃ¡n nhanh.")
 
     def _fill_selected_speaker_bindings_with_selected_preset(self) -> None:
         preset_id = str(self._voice_combo.currentData() or "").strip()
         if not preset_id:
-            QMessageBox.warning(self, "Speaker binding", "Hãy chọn preset giọng mặc định trước.")
+            QMessageBox.warning(self, "Speaker binding", "HÃ£y chá»n preset giá»ng máº·c Ä‘á»‹nh trÆ°á»›c.")
             return
         selected_rows = self._selected_table_row_indexes(self._speaker_binding_table)
         if not selected_rows:
-            QMessageBox.warning(self, "Speaker binding", "Hãy chọn ít nhất một dòng speaker trước.")
+            QMessageBox.warning(self, "Speaker binding", "HÃ£y chá»n Ã­t nháº¥t má»™t dÃ²ng speaker trÆ°á»›c.")
             return
         changed = 0
         for row_index in selected_rows:
@@ -2881,14 +2910,14 @@ class MainWindow(QMainWindow):
         self._refresh_speaker_binding_status_summary()
         if changed:
             self._set_speaker_binding_form_dirty(True)
-            self._append_log_line(f"Đã gán preset hiện tại cho {changed}/{len(selected_rows)} speaker được chọn")
+            self._append_log_line(f"ÄÃ£ gÃ¡n preset hiá»‡n táº¡i cho {changed}/{len(selected_rows)} speaker Ä‘Æ°á»£c chá»n")
         else:
-            QMessageBox.information(self, "Speaker binding", "Các speaker đã chọn đã dùng preset này hoặc không đổi được.")
+            QMessageBox.information(self, "Speaker binding", "CÃ¡c speaker Ä‘Ã£ chá»n Ä‘Ã£ dÃ¹ng preset nÃ y hoáº·c khÃ´ng Ä‘á»•i Ä‘Æ°á»£c.")
 
     def _clear_selected_speaker_bindings(self) -> None:
         selected_rows = self._selected_table_row_indexes(self._speaker_binding_table)
         if not selected_rows:
-            QMessageBox.warning(self, "Speaker binding", "Hãy chọn ít nhất một dòng speaker trước.")
+            QMessageBox.warning(self, "Speaker binding", "HÃ£y chá»n Ã­t nháº¥t má»™t dÃ²ng speaker trÆ°á»›c.")
             return
         changed = 0
         for row_index in selected_rows:
@@ -2899,9 +2928,9 @@ class MainWindow(QMainWindow):
         self._refresh_speaker_binding_status_summary()
         if changed:
             self._set_speaker_binding_form_dirty(True)
-            self._append_log_line(f"Đã xóa preset trên {changed}/{len(selected_rows)} speaker được chọn")
+            self._append_log_line(f"ÄÃ£ xÃ³a preset trÃªn {changed}/{len(selected_rows)} speaker Ä‘Æ°á»£c chá»n")
         else:
-            QMessageBox.information(self, "Speaker binding", "Các speaker đã chọn hiện đang để trống.")
+            QMessageBox.information(self, "Speaker binding", "CÃ¡c speaker Ä‘Ã£ chá»n hiá»‡n Ä‘ang Ä‘á»ƒ trá»‘ng.")
 
     def _clear_speaker_binding_form(self) -> None:
         changed = False
@@ -2919,14 +2948,14 @@ class MainWindow(QMainWindow):
         self._speaker_binding_loading = True
         self._speaker_binding_table.setRowCount(0)
         if not self._current_workspace:
-            self._speaker_binding_status.setText("Speaker binding: chưa mở dự án")
+            self._speaker_binding_status.setText("Speaker binding: chÆ°a má»Ÿ dá»± Ã¡n")
             self._speaker_binding_loading = False
             self._set_speaker_binding_form_dirty(False)
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
         if not analysis_rows:
-            self._speaker_binding_status.setText("Speaker binding: chưa có speaker từ Contextual V2")
+            self._speaker_binding_status.setText("Speaker binding: chÆ°a cÃ³ speaker tá»« Contextual V2")
             self._speaker_binding_loading = False
             self._set_speaker_binding_form_dirty(False)
             return
@@ -2959,7 +2988,7 @@ class MainWindow(QMainWindow):
             self._speaker_binding_table.setItem(row_index, 1, count_item)
 
             combo = QComboBox()
-            combo.addItem("Chưa gán", "")
+            combo.addItem("ChÆ°a gÃ¡n", "")
             for preset in self._voice_presets:
                 combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
             selected_preset_id = binding_map.get((candidate.speaker_type, candidate.speaker_key), "")
@@ -2975,7 +3004,7 @@ class MainWindow(QMainWindow):
             self._update_speaker_binding_row_status(row_index, available_preset_ids=available_preset_ids)
 
         if not candidates:
-            self._speaker_binding_status.setText("Speaker binding: chưa có speaker nhận diện đủ rõ để gán")
+            self._speaker_binding_status.setText("Speaker binding: chÆ°a cÃ³ speaker nháº­n diá»‡n Ä‘á»§ rÃµ Ä‘á»ƒ gÃ¡n")
             self._speaker_binding_loading = False
             self._set_speaker_binding_form_dirty(False)
             return
@@ -2985,7 +3014,7 @@ class MainWindow(QMainWindow):
 
     def _save_speaker_bindings(self) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Speaker binding", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "Speaker binding", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         now = utc_now_iso()
@@ -3017,13 +3046,13 @@ class MainWindow(QMainWindow):
         self._invalidate_subtitle_pipeline_outputs(clear_tts_audio=True)
         self._reload_speaker_bindings()
         self._refresh_workspace_views()
-        self._append_log_line(f"Đã lưu {len(bindings)} speaker binding")
+        self._append_log_line(f"ÄÃ£ lÆ°u {len(bindings)} speaker binding")
         QMessageBox.information(
             self,
             "Speaker binding",
             (
-                f"Đã lưu {len(bindings)} speaker binding.\n"
-                "- Nếu đã thay đổi mapping giọng, hãy chạy lại TTS rồi tạo lại track giọng."
+                f"ÄÃ£ lÆ°u {len(bindings)} speaker binding.\n"
+                "- Náº¿u Ä‘Ã£ thay Ä‘á»•i mapping giá»ng, hÃ£y cháº¡y láº¡i TTS rá»“i táº¡o láº¡i track giá»ng."
             ),
         )
 
@@ -3035,14 +3064,185 @@ class MainWindow(QMainWindow):
         status_text: str,
         status_kind: str,
     ) -> None:
-        status_item = table.item(row_index, 3)
+        status_item = table.item(row_index, VOICE_POLICY_STATUS_COLUMN)
         if status_item is None:
             status_item = QTableWidgetItem()
             status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            table.setItem(row_index, 3, status_item)
+            table.setItem(row_index, VOICE_POLICY_STATUS_COLUMN, status_item)
         status_item.setText(status_text)
         status_item.setData(Qt.ItemDataRole.UserRole, status_kind)
         status_item.setBackground(self._speaker_binding_status_color(status_kind))
+
+    def _voice_policy_preset_combo(self, table: QTableWidget, row_index: int) -> QComboBox | None:
+        combo = table.cellWidget(row_index, VOICE_POLICY_PRESET_COLUMN)
+        return combo if isinstance(combo, QComboBox) else None
+
+    def _voice_policy_override_input(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        column: int,
+    ) -> QLineEdit | None:
+        widget = table.cellWidget(row_index, column)
+        return widget if isinstance(widget, QLineEdit) else None
+
+    @staticmethod
+    def _coerce_optional_float(value: object | None) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _format_voice_policy_override_value(value: float | None) -> str:
+        if value is None:
+            return ""
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _parse_optional_voice_policy_float_value(
+        raw_value: str,
+        *,
+        field_name: str,
+        minimum: float,
+        maximum: float,
+    ) -> float | None:
+        if not raw_value.strip():
+            return None
+        return MainWindow._parse_voice_float_value(
+            raw_value,
+            field_name=field_name,
+            minimum=minimum,
+            maximum=maximum,
+            default=minimum,
+            strict=True,
+        )
+
+    def _create_voice_policy_override_input(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        *,
+        value: float | None,
+        placeholder: str,
+    ) -> QLineEdit:
+        input_widget = QLineEdit(self._format_voice_policy_override_value(value))
+        input_widget.setPlaceholderText(placeholder)
+        input_widget.textChanged.connect(
+            lambda _text, table=table, row_index=row_index: self._handle_voice_policy_selection_changed(
+                table,
+                row_index,
+            )
+        )
+        return input_widget
+
+    def _voice_policy_override_payload(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        *,
+        strict: bool,
+    ) -> dict[str, float]:
+        payload: dict[str, float] = {}
+        speed_input = self._voice_policy_override_input(table, row_index, VOICE_POLICY_SPEED_COLUMN)
+        volume_input = self._voice_policy_override_input(table, row_index, VOICE_POLICY_VOLUME_COLUMN)
+        pitch_input = self._voice_policy_override_input(table, row_index, VOICE_POLICY_PITCH_COLUMN)
+        if speed_input is not None:
+            speed_value = (
+                self._parse_optional_voice_policy_float_value(
+                    speed_input.text(),
+                    field_name="Tá»‘c Ä‘á»™ policy",
+                    minimum=0.1,
+                    maximum=4.0,
+                )
+                if strict
+                else self._coerce_optional_float(speed_input.text())
+            )
+            if speed_value is not None:
+                payload["speed"] = speed_value
+        if volume_input is not None:
+            volume_value = (
+                self._parse_optional_voice_policy_float_value(
+                    volume_input.text(),
+                    field_name="Ã‚m lÆ°á»£ng policy",
+                    minimum=0.0,
+                    maximum=4.0,
+                )
+                if strict
+                else self._coerce_optional_float(volume_input.text())
+            )
+            if volume_value is not None:
+                payload["volume"] = volume_value
+        if pitch_input is not None:
+            pitch_value = (
+                self._parse_optional_voice_policy_float_value(
+                    pitch_input.text(),
+                    field_name="Cao Ä‘á»™ policy",
+                    minimum=-24.0,
+                    maximum=24.0,
+                )
+                if strict
+                else self._coerce_optional_float(pitch_input.text())
+            )
+            if pitch_value is not None:
+                payload["pitch"] = pitch_value
+        return payload
+
+    def _current_voice_policy_style_payload(self, *, strict: bool) -> dict[str, float]:
+        preset = self._selected_voice_preset(strict=strict)
+        if preset is None:
+            return {}
+        return {
+            "speed": float(preset.speed),
+            "volume": float(preset.volume),
+            "pitch": float(preset.pitch),
+        }
+
+    def _apply_voice_policy_style_to_row(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        style_payload: dict[str, float],
+    ) -> bool:
+        changed = False
+        field_columns = {
+            "speed": VOICE_POLICY_SPEED_COLUMN,
+            "volume": VOICE_POLICY_VOLUME_COLUMN,
+            "pitch": VOICE_POLICY_PITCH_COLUMN,
+        }
+        for field_name, column in field_columns.items():
+            input_widget = self._voice_policy_override_input(table, row_index, column)
+            if input_widget is None or field_name not in style_payload:
+                continue
+            formatted_value = self._format_voice_policy_override_value(style_payload[field_name])
+            if input_widget.text().strip() != formatted_value:
+                input_widget.setText(formatted_value)
+                changed = True
+        return changed
+
+    def _clear_voice_policy_row_style(self, table: QTableWidget, row_index: int) -> bool:
+        changed = False
+        for column in (VOICE_POLICY_SPEED_COLUMN, VOICE_POLICY_VOLUME_COLUMN, VOICE_POLICY_PITCH_COLUMN):
+            input_widget = self._voice_policy_override_input(table, row_index, column)
+            if input_widget is not None and input_widget.text().strip():
+                input_widget.clear()
+                changed = True
+        return changed
+
+    def _clear_voice_policy_row(self, table: QTableWidget, row_index: int) -> bool:
+        changed = False
+        combo = self._voice_policy_preset_combo(table, row_index)
+        if combo is not None and combo.currentIndex() != 0:
+            combo.setCurrentIndex(0)
+            changed = True
+        for column in (VOICE_POLICY_SPEED_COLUMN, VOICE_POLICY_VOLUME_COLUMN, VOICE_POLICY_PITCH_COLUMN):
+            input_widget = self._voice_policy_override_input(table, row_index, column)
+            if input_widget is not None and input_widget.text().strip():
+                input_widget.clear()
+                changed = True
+        return changed
 
     def _update_voice_policy_row_status(
         self,
@@ -3051,15 +3251,16 @@ class MainWindow(QMainWindow):
         *,
         available_preset_ids: set[str] | None = None,
     ) -> None:
-        combo = table.cellWidget(row_index, 2)
-        if not isinstance(combo, QComboBox):
+        combo = self._voice_policy_preset_combo(table, row_index)
+        if combo is None:
             return
         preset_id = str(combo.currentData() or "").strip()
+        style_overrides = self._voice_policy_override_payload(table, row_index, strict=False)
         preset_ids = available_preset_ids or {preset.voice_preset_id for preset in self._voice_presets}
-        if not preset_id:
+        if not preset_id and not style_overrides:
             self._set_voice_policy_row_status(table, row_index, status_text="Chưa gán", status_kind="unbound")
             return
-        if preset_id not in preset_ids:
+        if preset_id and preset_id not in preset_ids:
             self._set_voice_policy_row_status(
                 table,
                 row_index,
@@ -3067,7 +3268,20 @@ class MainWindow(QMainWindow):
                 status_kind="missing",
             )
             return
-        ok_text = "Đã override theo quan hệ" if table is self._relationship_voice_policy_table else "Đã cấu hình fallback"
+        if table is self._relationship_voice_policy_table:
+            if preset_id and style_overrides:
+                ok_text = "Đã override preset + style"
+            elif preset_id:
+                ok_text = "Đã override theo quan hệ"
+            else:
+                ok_text = "Đã override style theo quan hệ"
+        else:
+            if preset_id and style_overrides:
+                ok_text = "Đã cấu hình fallback + style"
+            elif preset_id:
+                ok_text = "Đã cấu hình fallback"
+            else:
+                ok_text = "Đã cấu hình style"
         self._set_voice_policy_row_status(table, row_index, status_text=ok_text, status_kind="ok")
 
     def _refresh_voice_policy_status_summary(self) -> None:
@@ -3081,22 +3295,35 @@ class MainWindow(QMainWindow):
 
         bound_count = 0
         missing_count = 0
+        style_only_count = 0
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in range(table.rowCount()):
-                status_item = table.item(row_index, 3)
+                status_item = table.item(row_index, VOICE_POLICY_STATUS_COLUMN)
                 status_kind = str(status_item.data(Qt.ItemDataRole.UserRole) or "") if status_item else ""
                 if status_kind == "ok":
                     bound_count += 1
+                    combo = self._voice_policy_preset_combo(table, row_index)
+                    if combo is not None and not str(combo.currentData() or "").strip():
+                        style_only_count += 1
                 elif status_kind == "missing":
                     missing_count += 1
 
         if bound_count == 0:
             self._voice_policy_status.setText(
-                f"Voice policy: có {total_rows} hàng policy khả dụng. Nếu chưa lưu policy nào, track sẽ dùng speaker binding rồi mới rơi về preset mặc định."
+                "Voice policy: "
+                + (
+                    f"có {total_rows} hàng policy khả dụng. Nếu chưa lưu policy nào, "
+                    "runtime sẽ dùng speaker binding rồi mới rơi về preset mặc định."
+                )
             )
             return
 
-        details = [f"{bound_count}/{total_rows} hàng voice policy đã có preset."]
+        preset_bound_count = bound_count - style_only_count
+        details = [f"{bound_count}/{total_rows} hàng voice policy đã được cấu hình."]
+        if preset_bound_count:
+            details.append(f"{preset_bound_count} hàng có preset override/fallback.")
+        if style_only_count:
+            details.append(f"{style_only_count} hàng chỉ dùng style override.")
         if missing_count:
             details.append(f"{missing_count} policy đang trỏ tới preset không còn tồn tại.")
         else:
@@ -3105,7 +3332,7 @@ class MainWindow(QMainWindow):
 
     def _set_voice_policy_form_dirty(self, is_dirty: bool) -> None:
         self._voice_policy_dirty = is_dirty
-        marker = " Form hiện có thay đổi chưa lưu."
+        marker = " Form hiá»‡n cÃ³ thay Ä‘á»•i chÆ°a lÆ°u."
         status_text = self._voice_policy_status.text().strip()
         if status_text:
             if is_dirty and marker not in status_text:
@@ -3114,11 +3341,11 @@ class MainWindow(QMainWindow):
                 self._voice_policy_status.setText(status_text.replace(marker, ""))
         if is_dirty:
             self._voice_policy_hint.setText(
-                "Lưu ý: voice policy trên form đang có thay đổi chưa lưu. Runtime chỉ dùng policy đã lưu trong dự án."
+                "LÆ°u Ã½: voice policy trÃªn form Ä‘ang cÃ³ thay Ä‘á»•i chÆ°a lÆ°u. Runtime chá»‰ dÃ¹ng policy Ä‘Ã£ lÆ°u trong dá»± Ã¡n."
             )
         else:
             self._voice_policy_hint.setText(
-                "Mẹo: voice policy là fallback mềm. Quan hệ speaker->listener sẽ ưu tiên hơn policy theo nhân vật, nhưng speaker binding vẫn là mức ưu tiên cao nhất."
+                "Máº¹o: voice policy lÃ  fallback má»m. Quan há»‡ speaker->listener sáº½ Æ°u tiÃªn hÆ¡n policy theo nhÃ¢n váº­t, nhÆ°ng speaker binding váº«n lÃ  má»©c Æ°u tiÃªn cao nháº¥t."
             )
         self._sync_voice_summary_with_binding_form_state()
 
@@ -3132,13 +3359,13 @@ class MainWindow(QMainWindow):
     def _fill_unbound_voice_policies_with_selected_preset(self) -> None:
         preset_id = str(self._voice_combo.currentData() or "").strip()
         if not preset_id:
-            QMessageBox.warning(self, "Voice policy", "Hãy chọn preset giọng mặc định trước.")
+            QMessageBox.warning(self, "Voice policy", "HÃ£y chá»n preset giá»ng máº·c Ä‘á»‹nh trÆ°á»›c.")
             return
         changed = 0
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in range(table.rowCount()):
-                combo = table.cellWidget(row_index, 2)
-                if not isinstance(combo, QComboBox):
+                combo = self._voice_policy_preset_combo(table, row_index)
+                if combo is None:
                     continue
                 if str(combo.currentData() or "").strip():
                     continue
@@ -3150,25 +3377,51 @@ class MainWindow(QMainWindow):
         self._refresh_voice_policy_status_summary()
         if changed:
             self._set_voice_policy_form_dirty(True)
-            self._append_log_line(f"Đã gán preset hiện tại cho {changed} hàng voice policy còn trống")
+            self._append_log_line(f"ÄÃ£ gÃ¡n preset hiá»‡n táº¡i cho {changed} hÃ ng voice policy cÃ²n trá»‘ng")
         else:
-            QMessageBox.information(self, "Voice policy", "Không có hàng policy trống nào để gán nhanh.")
+            QMessageBox.information(self, "Voice policy", "KhÃ´ng cÃ³ hÃ ng policy trá»‘ng nÃ o Ä‘á»ƒ gÃ¡n nhanh.")
+
+    def _fill_unstyled_voice_policies_with_current_style(self) -> None:
+        try:
+            style_payload = self._current_voice_policy_style_payload(strict=True)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Voice policy", str(exc))
+            return
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                if self._voice_policy_override_payload(table, row_index, strict=False):
+                    continue
+                if self._apply_voice_policy_style_to_row(table, row_index, style_payload):
+                    changed += 1
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã điền style hiện tại cho {changed} hàng voice policy chưa có style")
+        else:
+            QMessageBox.information(self, "Voice policy", "Không có hàng policy nào đang trống style.")
 
     def _selected_table_row_indexes(self, table: QTableWidget) -> list[int]:
-        return sorted({index.row() for index in table.selectionModel().selectedRows()})
+        selection_model = table.selectionModel()
+        if selection_model is None:
+            return [table.currentRow()] if table.currentRow() >= 0 else []
+        selected_rows = sorted({index.row() for index in selection_model.selectedIndexes()})
+        if selected_rows:
+            return selected_rows
+        return [table.currentRow()] if table.currentRow() >= 0 else []
 
     def _fill_selected_voice_policy_rows_with_selected_preset(self) -> None:
         preset_id = str(self._voice_combo.currentData() or "").strip()
         if not preset_id:
-            QMessageBox.warning(self, "Voice policy", "Hãy chọn preset giọng mặc định trước.")
+            QMessageBox.warning(self, "Voice policy", "HÃ£y chá»n preset giá»ng máº·c Ä‘á»‹nh trÆ°á»›c.")
             return
         selected_count = 0
         changed = 0
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in self._selected_table_row_indexes(table):
                 selected_count += 1
-                combo = table.cellWidget(row_index, 2)
-                if not isinstance(combo, QComboBox):
+                combo = self._voice_policy_preset_combo(table, row_index)
+                if combo is None:
                     continue
                 for combo_index in range(combo.count()):
                     if str(combo.itemData(combo_index) or "").strip() == preset_id:
@@ -3177,24 +3430,27 @@ class MainWindow(QMainWindow):
                             changed += 1
                         break
         if selected_count == 0:
-            QMessageBox.warning(self, "Voice policy", "Hãy chọn ít nhất một dòng policy trước.")
+            QMessageBox.warning(self, "Voice policy", "HÃ£y chá»n Ã­t nháº¥t má»™t dÃ²ng policy trÆ°á»›c.")
             return
         self._refresh_voice_policy_status_summary()
         if changed:
             self._set_voice_policy_form_dirty(True)
-            self._append_log_line(f"Đã gán preset hiện tại cho {changed}/{selected_count} dòng voice policy được chọn")
+            self._append_log_line(f"ÄÃ£ gÃ¡n preset hiá»‡n táº¡i cho {changed}/{selected_count} dÃ²ng voice policy Ä‘Æ°á»£c chá»n")
         else:
-            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn đã dùng preset này hoặc không đổi được.")
+            QMessageBox.information(self, "Voice policy", "CÃ¡c dÃ²ng Ä‘Ã£ chá»n Ä‘Ã£ dÃ¹ng preset nÃ y hoáº·c khÃ´ng Ä‘á»•i Ä‘Æ°á»£c.")
 
-    def _clear_selected_voice_policy_rows(self) -> None:
+    def _fill_selected_voice_policy_rows_with_current_style(self) -> None:
+        try:
+            style_payload = self._current_voice_policy_style_payload(strict=True)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Voice policy", str(exc))
+            return
         selected_count = 0
         changed = 0
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in self._selected_table_row_indexes(table):
                 selected_count += 1
-                combo = table.cellWidget(row_index, 2)
-                if isinstance(combo, QComboBox) and combo.currentIndex() != 0:
-                    combo.setCurrentIndex(0)
+                if self._apply_voice_policy_style_to_row(table, row_index, style_payload):
                     changed += 1
         if selected_count == 0:
             QMessageBox.warning(self, "Voice policy", "Hãy chọn ít nhất một dòng policy trước.")
@@ -3202,19 +3458,62 @@ class MainWindow(QMainWindow):
         self._refresh_voice_policy_status_summary()
         if changed:
             self._set_voice_policy_form_dirty(True)
-            self._append_log_line(f"Đã xóa preset trên {changed}/{selected_count} dòng voice policy được chọn")
+            self._append_log_line(f"Đã điền style hiện tại cho {changed}/{selected_count} dòng voice policy được chọn")
         else:
-            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn hiện đang để trống.")
+            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn đã có cùng style hoặc không đổi được.")
+
+    def _clear_selected_voice_policy_rows(self) -> None:
+        selected_count = 0
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in self._selected_table_row_indexes(table):
+                selected_count += 1
+                if self._clear_voice_policy_row(table, row_index):
+                    changed += 1
+        if selected_count == 0:
+            QMessageBox.warning(self, "Voice policy", "HÃ£y chá»n Ã­t nháº¥t má»™t dÃ²ng policy trÆ°á»›c.")
+            return
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"ÄÃ£ xÃ³a preset trÃªn {changed}/{selected_count} dÃ²ng voice policy Ä‘Æ°á»£c chá»n")
+        else:
+            QMessageBox.information(self, "Voice policy", "CÃ¡c dÃ²ng Ä‘Ã£ chá»n hiá»‡n Ä‘ang Ä‘á»ƒ trá»‘ng.")
+
+    def _clear_selected_voice_policy_row_styles(self) -> None:
+        selected_count = 0
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in self._selected_table_row_indexes(table):
+                selected_count += 1
+                if self._clear_voice_policy_row_style(table, row_index):
+                    changed += 1
+        if selected_count == 0:
+            QMessageBox.warning(self, "Voice policy", "Hãy chọn ít nhất một dòng policy trước.")
+            return
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã xóa style trên {changed}/{selected_count} dòng voice policy được chọn")
+        else:
+            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn hiện chưa có style override.")
 
     def _clear_voice_policy_form(self) -> None:
         changed = False
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in range(table.rowCount()):
-                combo = table.cellWidget(row_index, 2)
-                if isinstance(combo, QComboBox):
-                    if combo.currentIndex() != 0:
-                        changed = True
-                    combo.setCurrentIndex(0)
+                if self._clear_voice_policy_row(table, row_index):
+                    changed = True
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+
+    def _clear_voice_policy_form_styles(self) -> None:
+        changed = False
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                if self._clear_voice_policy_row_style(table, row_index):
+                    changed = True
         self._refresh_voice_policy_status_summary()
         if changed:
             self._set_voice_policy_form_dirty(True)
@@ -3224,14 +3523,14 @@ class MainWindow(QMainWindow):
         self._character_voice_policy_table.setRowCount(0)
         self._relationship_voice_policy_table.setRowCount(0)
         if not self._current_workspace:
-            self._voice_policy_status.setText("Voice policy: chưa mở dự án")
+            self._voice_policy_status.setText("Voice policy: chÆ°a má»Ÿ dá»± Ã¡n")
             self._voice_policy_loading = False
             self._set_voice_policy_form_dirty(False)
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
         if not analysis_rows:
-            self._voice_policy_status.setText("Voice policy: chưa có dữ liệu Contextual V2")
+            self._voice_policy_status.setText("Voice policy: chÆ°a cÃ³ dá»¯ liá»‡u Contextual V2")
             self._voice_policy_loading = False
             self._set_voice_policy_form_dirty(False)
             return
@@ -3242,7 +3541,7 @@ class MainWindow(QMainWindow):
         available_preset_ids = {preset.voice_preset_id for preset in self._voice_presets}
 
         character_policy_map = {
-            str(row["speaker_character_id"] or "").strip(): str(row["voice_preset_id"] or "").strip()
+            str(row["speaker_character_id"] or "").strip(): row
             for row in voice_policy_rows
             if str(row["policy_scope"] or "character").strip() == "character"
             and str(row["speaker_character_id"] or "").strip()
@@ -3251,7 +3550,7 @@ class MainWindow(QMainWindow):
             (
                 str(row["speaker_character_id"] or "").strip(),
                 str(row["listener_character_id"] or "").strip(),
-            ): str(row["voice_preset_id"] or "").strip()
+            ): row
             for row in voice_policy_rows
             if str(row["policy_scope"] or "").strip() == "relationship"
             and str(row["speaker_character_id"] or "").strip()
@@ -3332,21 +3631,60 @@ class MainWindow(QMainWindow):
             count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self._character_voice_policy_table.setItem(row_index, 1, count_item)
             combo = QComboBox()
-            combo.addItem("Chưa gán", "")
+            combo.addItem("ChÆ°a gÃ¡n", "")
             for preset in self._voice_presets:
                 combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
-            selected_preset_id = character_policy_map.get(candidate.speaker_key, "")
+            selected_policy_row = character_policy_map.get(candidate.speaker_key)
+            selected_preset_id = (
+                str(selected_policy_row["voice_preset_id"] or "").strip() if selected_policy_row is not None else ""
+            )
             if selected_preset_id:
                 for combo_index in range(combo.count()):
                     if combo.itemData(combo_index) == selected_preset_id:
                         combo.setCurrentIndex(combo_index)
                         break
-            self._character_voice_policy_table.setCellWidget(row_index, 2, combo)
+            self._character_voice_policy_table.setCellWidget(row_index, VOICE_POLICY_PRESET_COLUMN, combo)
             combo.currentIndexChanged.connect(
                 lambda _index, row_index=row_index: self._handle_voice_policy_selection_changed(
                     self._character_voice_policy_table,
                     row_index,
                 )
+            )
+            self._character_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_SPEED_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._character_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["speed_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
+            )
+            self._character_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_VOLUME_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._character_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["volume_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
+            )
+            self._character_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_PITCH_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._character_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["pitch_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
             )
             self._update_voice_policy_row_status(
                 self._character_voice_policy_table,
@@ -3371,21 +3709,60 @@ class MainWindow(QMainWindow):
             count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self._relationship_voice_policy_table.setItem(row_index, 1, count_item)
             combo = QComboBox()
-            combo.addItem("Chưa gán", "")
+            combo.addItem("ChÆ°a gÃ¡n", "")
             for preset in self._voice_presets:
                 combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
-            selected_preset_id = relationship_policy_map.get((candidate.speaker_key, candidate.listener_key), "")
+            selected_policy_row = relationship_policy_map.get((candidate.speaker_key, candidate.listener_key))
+            selected_preset_id = (
+                str(selected_policy_row["voice_preset_id"] or "").strip() if selected_policy_row is not None else ""
+            )
             if selected_preset_id:
                 for combo_index in range(combo.count()):
                     if combo.itemData(combo_index) == selected_preset_id:
                         combo.setCurrentIndex(combo_index)
                         break
-            self._relationship_voice_policy_table.setCellWidget(row_index, 2, combo)
+            self._relationship_voice_policy_table.setCellWidget(row_index, VOICE_POLICY_PRESET_COLUMN, combo)
             combo.currentIndexChanged.connect(
                 lambda _index, row_index=row_index: self._handle_voice_policy_selection_changed(
                     self._relationship_voice_policy_table,
                     row_index,
                 )
+            )
+            self._relationship_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_SPEED_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._relationship_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["speed_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
+            )
+            self._relationship_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_VOLUME_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._relationship_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["volume_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
+            )
+            self._relationship_voice_policy_table.setCellWidget(
+                row_index,
+                VOICE_POLICY_PITCH_COLUMN,
+                self._create_voice_policy_override_input(
+                    self._relationship_voice_policy_table,
+                    row_index,
+                    value=self._coerce_optional_float(
+                        selected_policy_row["pitch_override"] if selected_policy_row is not None else None
+                    ),
+                    placeholder="Máº·c Ä‘á»‹nh",
+                ),
             )
             self._update_voice_policy_row_status(
                 self._relationship_voice_policy_table,
@@ -3399,7 +3776,7 @@ class MainWindow(QMainWindow):
 
     def _save_voice_policies(self) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Voice policy", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "Voice policy", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         now = utc_now_iso()
@@ -3407,15 +3784,20 @@ class MainWindow(QMainWindow):
         for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
             for row_index in range(table.rowCount()):
                 policy_item = table.item(row_index, 0)
-                combo = table.cellWidget(row_index, 2)
-                if policy_item is None or not isinstance(combo, QComboBox):
+                combo = self._voice_policy_preset_combo(table, row_index)
+                if policy_item is None or combo is None:
                     continue
                 payload = policy_item.data(Qt.ItemDataRole.UserRole) or {}
                 policy_scope = str(payload.get("policy_scope", "character") or "character").strip() or "character"
                 speaker_character_id = str(payload.get("speaker_character_id", "") or "").strip()
                 listener_character_id = str(payload.get("listener_character_id", "") or "").strip()
                 voice_preset_id = str(combo.currentData() or "").strip()
-                if not speaker_character_id or not voice_preset_id:
+                try:
+                    style_overrides = self._voice_policy_override_payload(table, row_index, strict=True)
+                except ValueError as exc:
+                    QMessageBox.warning(self, "Voice policy", str(exc))
+                    return
+                if not speaker_character_id or (not voice_preset_id and not style_overrides):
                     continue
                 policy_id = (
                     f"voicepolicy:relationship:{speaker_character_id}:{listener_character_id}"
@@ -3430,6 +3812,9 @@ class MainWindow(QMainWindow):
                         speaker_character_id=speaker_character_id,
                         listener_character_id=listener_character_id or None,
                         voice_preset_id=voice_preset_id,
+                        speed_override=style_overrides.get("speed"),
+                        volume_override=style_overrides.get("volume"),
+                        pitch_override=style_overrides.get("pitch"),
                         created_at=now,
                         updated_at=now,
                     )
@@ -3439,13 +3824,13 @@ class MainWindow(QMainWindow):
         self._invalidate_subtitle_pipeline_outputs(clear_tts_audio=True)
         self._reload_voice_policies()
         self._refresh_workspace_views()
-        self._append_log_line(f"Đã lưu {len(policies)} voice policy")
+        self._append_log_line(f"ÄÃ£ lÆ°u {len(policies)} voice policy")
         QMessageBox.information(
             self,
             "Voice policy",
             (
-                f"Đã lưu {len(policies)} voice policy.\n"
-                "- Nếu đã thay đổi policy giọng, hãy chạy lại TTS rồi tạo lại track giọng."
+                f"ÄÃ£ lÆ°u {len(policies)} voice policy.\n"
+                "- Náº¿u Ä‘Ã£ thay Ä‘á»•i policy giá»ng, hÃ£y cháº¡y láº¡i TTS rá»“i táº¡o láº¡i track giá»ng."
             ),
         )
 
@@ -3461,7 +3846,7 @@ class MainWindow(QMainWindow):
         default_preset = self._selected_voice_preset(strict=False)
         if default_preset is None:
             if warn_on_unresolved:
-                QMessageBox.warning(self, dialog_title, "Không tìm thấy preset giọng trong dự án.")
+                QMessageBox.warning(self, dialog_title, "KhÃ´ng tÃ¬m tháº¥y preset giá»ng trong dá»± Ã¡n.")
             return None, None, None, None
 
         available_presets = {preset.voice_preset_id: preset for preset in self._voice_presets}
@@ -3492,19 +3877,20 @@ class MainWindow(QMainWindow):
 
         if plan.missing_preset_ids or plan.unresolved_speakers:
             if warn_on_unresolved:
-                lines = ["Voice policy/binding hiện chưa đầy đủ, chưa thể chạy TTS an toàn."]
+                lines = ["Voice policy/binding hiá»‡n chÆ°a Ä‘áº§y Ä‘á»§, chÆ°a thá»ƒ cháº¡y TTS an toÃ n."]
                 if plan.unresolved_speakers:
-                    lines.append(f"- Speaker chưa gán preset: {', '.join(plan.unresolved_speakers)}")
+                    lines.append(f"- Speaker chÆ°a gÃ¡n preset: {', '.join(plan.unresolved_speakers)}")
                 if plan.missing_preset_ids:
-                    lines.append(f"- Preset không còn tồn tại: {', '.join(plan.missing_preset_ids)}")
-                lines.append("- Hãy vào tab Lồng tiếng, hoàn tất speaker binding/voice policy rồi thử lại.")
+                    lines.append(f"- Preset khÃ´ng cÃ²n tá»“n táº¡i: {', '.join(plan.missing_preset_ids)}")
+                lines.append("- HÃ£y vÃ o tab Lá»“ng tiáº¿ng, hoÃ n táº¥t speaker binding/voice policy rá»“i thá»­ láº¡i.")
                 QMessageBox.warning(self, dialog_title, "\n".join(lines))
             return default_preset, None, plan.segment_speaker_keys or None, plan
 
-        segment_voice_presets = {
-            segment_id: available_presets[preset_id]
-            for segment_id, preset_id in plan.segment_voice_preset_ids.items()
-        }
+        segment_voice_presets = resolve_segment_voice_presets(
+            plan=plan,
+            default_preset=default_preset,
+            available_presets=available_presets,
+        )
         return default_preset, segment_voice_presets or None, plan.segment_speaker_keys or None, plan
 
     @staticmethod
@@ -3522,12 +3908,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             if not strict:
                 return default
-            raise ValueError(f"{field_name} phải là số")
+            raise ValueError(f"{field_name} pháº£i lÃ  sá»‘")
         if minimum <= value <= maximum:
             return value
         if not strict:
             return default
-        raise ValueError(f"{field_name} phải nằm trong khoảng {minimum}..{maximum}")
+        raise ValueError(f"{field_name} pháº£i náº±m trong khoáº£ng {minimum}..{maximum}")
 
     @staticmethod
     def _parse_voice_int_value(
@@ -3543,12 +3929,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             if not strict:
                 return default
-            raise ValueError(f"{field_name} phải là số nguyên")
+            raise ValueError(f"{field_name} pháº£i lÃ  sá»‘ nguyÃªn")
         if value >= minimum:
             return value
         if not strict:
             return default
-        raise ValueError(f"{field_name} phải >= {minimum}")
+        raise ValueError(f"{field_name} pháº£i >= {minimum}")
 
     def _build_unique_voice_preset_id(
         self,
@@ -3571,20 +3957,20 @@ class MainWindow(QMainWindow):
     def _save_current_voice_preset(self, checked: bool = False, *, save_as_new: bool = False) -> None:
         del checked
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         base_preset = self._base_selected_voice_preset()
         name = self._voice_profile_name_input.text().strip() or (base_preset.name if base_preset else "")
         if not name:
-            QMessageBox.warning(self, "Preset giọng", "Hãy nhập tên preset giọng trước khi lưu.")
+            QMessageBox.warning(self, "Preset giá»ng", "HÃ£y nháº­p tÃªn preset giá»ng trÆ°á»›c khi lÆ°u.")
             return
         try:
             preset = self._selected_voice_preset(strict=True)
         except ValueError as exc:
-            QMessageBox.warning(self, "Preset giọng", str(exc))
+            QMessageBox.warning(self, "Preset giá»ng", str(exc))
             return
         if not preset:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy preset giọng để lưu.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y preset giá»ng Ä‘á»ƒ lÆ°u.")
             return
 
         preset_id = (
@@ -3602,24 +3988,24 @@ class MainWindow(QMainWindow):
         self._persist_active_voice_preset_id(preset.voice_preset_id)
         self._sync_voice_preset_form()
         self._refresh_workspace_views()
-        self._append_log_line(f"Đã lưu preset giọng: {output_path}")
-        QMessageBox.information(self, "Preset giọng", f"Đã lưu preset tại:\n{output_path}")
+        self._append_log_line(f"ÄÃ£ lÆ°u preset giá»ng: {output_path}")
+        QMessageBox.information(self, "Preset giá»ng", f"ÄÃ£ lÆ°u preset táº¡i:\n{output_path}")
 
     def _delete_selected_voice_preset(self) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         preset = self._base_selected_voice_preset()
         if not preset:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy preset để xóa.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y preset Ä‘á»ƒ xÃ³a.")
             return
         if len(self._voice_presets) <= 1:
-            QMessageBox.warning(self, "Preset giọng", "Dự án phải còn ít nhất 1 preset giọng.")
+            QMessageBox.warning(self, "Preset giá»ng", "Dá»± Ã¡n pháº£i cÃ²n Ã­t nháº¥t 1 preset giá»ng.")
             return
         answer = QMessageBox.question(
             self,
-            "Xóa preset giọng",
-            f"Xóa preset '{preset.name}'?",
+            "XÃ³a preset giá»ng",
+            f"XÃ³a preset '{preset.name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -3628,7 +4014,7 @@ class MainWindow(QMainWindow):
 
         deleted_path = delete_voice_preset(self._current_workspace.root_dir, preset.voice_preset_id)
         if not deleted_path:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy file preset để xóa.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y file preset Ä‘á»ƒ xÃ³a.")
             return
         self._reload_voice_presets()
         resolved_preset_id = self._set_voice_combo_to_preset(None)
@@ -3636,20 +4022,20 @@ class MainWindow(QMainWindow):
             self._persist_active_voice_preset_id(resolved_preset_id)
         self._sync_voice_preset_form()
         self._refresh_workspace_views()
-        self._append_log_line(f"Đã xóa preset giọng: {deleted_path}")
-        QMessageBox.information(self, "Preset giọng", f"Đã xóa preset tại:\n{deleted_path}")
+        self._append_log_line(f"ÄÃ£ xÃ³a preset giá»ng: {deleted_path}")
+        QMessageBox.information(self, "Preset giá»ng", f"ÄÃ£ xÃ³a preset táº¡i:\n{deleted_path}")
 
     def _batch_import_voice_profiles(self) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         try:
             template_preset = self._selected_voice_preset(strict=True)
         except ValueError as exc:
-            QMessageBox.warning(self, "Nhập hàng loạt", str(exc))
+            QMessageBox.warning(self, "Nháº­p hÃ ng loáº¡t", str(exc))
             return
         if template_preset is None:
-            QMessageBox.warning(self, "Nhập hàng loạt", "Không tìm thấy preset mẫu.")
+            QMessageBox.warning(self, "Nháº­p hÃ ng loáº¡t", "KhÃ´ng tÃ¬m tháº¥y preset máº«u.")
             return
         if template_preset.engine.lower() != "vieneu":
             template_preset = template_preset.model_copy(
@@ -3668,8 +4054,8 @@ class MainWindow(QMainWindow):
         if not report.imported_presets:
             QMessageBox.warning(
                 self,
-                "Nhập hàng loạt",
-                "Không import được profile nào. Hãy đặt file audio mẫu trong `assets/voices` kèm file `.txt` cùng tên.",
+                "Nháº­p hÃ ng loáº¡t",
+                "KhÃ´ng import Ä‘Æ°á»£c profile nÃ o. HÃ£y Ä‘áº·t file audio máº«u trong `assets/voices` kÃ¨m file `.txt` cÃ¹ng tÃªn.",
             )
             return
 
@@ -3680,23 +4066,23 @@ class MainWindow(QMainWindow):
         self._sync_voice_preset_form()
         self._refresh_workspace_views()
         self._voice_profile_status.setText(
-            "Đã nhập hàng loạt "
-            f"{len(report.imported_presets)} preset; thiếu `.txt`={len(report.skipped_missing_text)}; "
-            f"`.txt` rỗng={len(report.skipped_empty_text)}"
+            "ÄÃ£ nháº­p hÃ ng loáº¡t "
+            f"{len(report.imported_presets)} preset; thiáº¿u `.txt`={len(report.skipped_missing_text)}; "
+            f"`.txt` rá»—ng={len(report.skipped_empty_text)}"
         )
         self._append_log_line(
-            "Nhập hàng loạt preset giọng: "
+            "Nháº­p hÃ ng loáº¡t preset giá»ng: "
             f"da_nhap={len(report.imported_presets)} "
             f"thieu_txt={len(report.skipped_missing_text)} "
             f"txt_rong={len(report.skipped_empty_text)}"
         )
         QMessageBox.information(
             self,
-            "Nhập hàng loạt",
-            "Đã nhập preset giọng:\n"
-            f"- Đã tạo: {len(report.imported_presets)}\n"
-            f"- Thiếu file `.txt`: {len(report.skipped_missing_text)}\n"
-            f"- File `.txt` rỗng: {len(report.skipped_empty_text)}",
+            "Nháº­p hÃ ng loáº¡t",
+            "ÄÃ£ nháº­p preset giá»ng:\n"
+            f"- ÄÃ£ táº¡o: {len(report.imported_presets)}\n"
+            f"- Thiáº¿u file `.txt`: {len(report.skipped_missing_text)}\n"
+            f"- File `.txt` rá»—ng: {len(report.skipped_empty_text)}",
         )
 
     def _base_selected_export_preset(self):
@@ -3753,7 +4139,7 @@ class MainWindow(QMainWindow):
                 watermark_opacity=0.85,
                 watermark_scale=0.16,
                 watermark_margin=24,
-                notes="Chưa có profile watermark. Bạn có thể nhập thông số rồi lưu thành profile mới.",
+                notes="ChÆ°a cÃ³ profile watermark. Báº¡n cÃ³ thá»ƒ nháº­p thÃ´ng sá»‘ rá»“i lÆ°u thÃ nh profile má»›i.",
             )
         else:
             values = profile
@@ -3784,7 +4170,7 @@ class MainWindow(QMainWindow):
         if profile is None:
             self._watermark_profile_status.setText(values.notes)
         else:
-            self._watermark_profile_status.setText(profile.notes or "Không có ghi chú cho profile watermark này")
+            self._watermark_profile_status.setText(profile.notes or "KhÃ´ng cÃ³ ghi chÃº cho profile watermark nÃ y")
 
     def _handle_watermark_profile_changed(self, index: int) -> None:
         del index
@@ -3801,11 +4187,11 @@ class MainWindow(QMainWindow):
         base_profile = self._base_selected_watermark_profile()
         if base_profile is not None:
             self._watermark_profile_status.setText(
-                f"Đang sửa profile {base_profile.name}. Bấm 'Lưu profile' hoặc 'Lưu thành bản mới' để lưu lại."
+                f"Äang sá»­a profile {base_profile.name}. Báº¥m 'LÆ°u profile' hoáº·c 'LÆ°u thÃ nh báº£n má»›i' Ä‘á»ƒ lÆ°u láº¡i."
             )
         else:
             self._watermark_profile_status.setText(
-                "Đang sửa profile watermark tạm thời. Bấm 'Lưu thành bản mới' để tái sử dụng cho lần sau."
+                "Äang sá»­a profile watermark táº¡m thá»i. Báº¥m 'LÆ°u thÃ nh báº£n má»›i' Ä‘á»ƒ tÃ¡i sá»­ dá»¥ng cho láº§n sau."
             )
         if self._current_workspace:
             self._refresh_workspace_views()
@@ -3904,12 +4290,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             if not strict:
                 return default
-            raise ValueError(f"{field_name} phải là số")
+            raise ValueError(f"{field_name} pháº£i lÃ  sá»‘")
         if minimum <= value <= maximum:
             return value
         if not strict:
             return default
-        raise ValueError(f"{field_name} phải nằm trong khoảng {minimum}..{maximum}")
+        raise ValueError(f"{field_name} pháº£i náº±m trong khoáº£ng {minimum}..{maximum}")
 
     @staticmethod
     def _parse_watermark_int_value(
@@ -3925,12 +4311,12 @@ class MainWindow(QMainWindow):
         except ValueError:
             if not strict:
                 return default
-            raise ValueError(f"{field_name} phải là số nguyên")
+            raise ValueError(f"{field_name} pháº£i lÃ  sá»‘ nguyÃªn")
         if value >= minimum:
             return value
         if not strict:
             return default
-        raise ValueError(f"{field_name} phải >= {minimum}")
+        raise ValueError(f"{field_name} pháº£i >= {minimum}")
 
     def _build_unique_watermark_profile_id(
         self,
@@ -3953,14 +4339,14 @@ class MainWindow(QMainWindow):
     def _save_current_watermark_profile(self, checked: bool = False, *, save_as_new: bool = False) -> None:
         del checked
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
         base_profile = self._base_selected_watermark_profile()
         name = self._watermark_profile_name_input.text().strip() or (
             base_profile.name if base_profile else ""
         )
         if not name:
-            QMessageBox.warning(self, "Profile watermark", "Hãy nhập tên profile trước khi lưu.")
+            QMessageBox.warning(self, "Profile watermark", "HÃ£y nháº­p tÃªn profile trÆ°á»›c khi lÆ°u.")
             return
 
         base_id = self._slugify_token(name, fallback="watermark-profile")
@@ -3978,7 +4364,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Profile watermark", str(exc))
             return
         if profile is None:
-            QMessageBox.warning(self, "Profile watermark", "Không có dữ liệu để lưu.")
+            QMessageBox.warning(self, "Profile watermark", "KhÃ´ng cÃ³ dá»¯ liá»‡u Ä‘á»ƒ lÆ°u.")
             return
         profile = profile.model_copy(
             update={
@@ -3993,17 +4379,17 @@ class MainWindow(QMainWindow):
         self._persist_active_watermark_profile_id(profile.watermark_profile_id)
         self._sync_watermark_profile_form()
         self._refresh_workspace_views()
-        self._append_log_line(f"Đã lưu watermark profile: {output_path}")
-        QMessageBox.information(self, "Profile watermark", f"Đã lưu profile tại:\n{output_path}")
+        self._append_log_line(f"ÄÃ£ lÆ°u watermark profile: {output_path}")
+        QMessageBox.information(self, "Profile watermark", f"ÄÃ£ lÆ°u profile táº¡i:\n{output_path}")
 
     @staticmethod
     def _parse_volume_value(raw_value: str, *, field_name: str) -> float:
         try:
             value = float(raw_value.strip() or "0")
         except ValueError as exc:
-            raise ValueError(f"{field_name} phải là số") from exc
+            raise ValueError(f"{field_name} pháº£i lÃ  sá»‘") from exc
         if value < 0:
-            raise ValueError(f"{field_name} không được âm")
+            raise ValueError(f"{field_name} khÃ´ng Ä‘Æ°á»£c Ã¢m")
         return value
 
     def _resolve_bgm_path(self) -> Path | None:
@@ -4032,41 +4418,41 @@ class MainWindow(QMainWindow):
     def _split_selected_subtitle_row(self) -> None:
         row_index = self._selected_subtitle_row_index()
         if row_index < 0:
-            QMessageBox.warning(self, "Biên tập phụ đề", "Hãy chọn một dòng để tách.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "HÃ£y chá»n má»™t dÃ²ng Ä‘á»ƒ tÃ¡ch.")
             return
         try:
             rows = self._collect_subtitle_table_rows()
             first, second = split_editor_row(rows[row_index])
         except ValueError as exc:
-            QMessageBox.warning(self, "Biên tập phụ đề", str(exc))
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", str(exc))
             return
 
         new_rows = rows[:row_index] + [first, second] + rows[row_index + 1 :]
         self._replace_subtitle_editor_rows(
             new_rows,
-            status_message=f"Đã tách dòng {row_index + 1} thành 2 đoạn. Hãy lưu để áp dụng.",
+            status_message=f"ÄÃ£ tÃ¡ch dÃ²ng {row_index + 1} thÃ nh 2 Ä‘oáº¡n. HÃ£y lÆ°u Ä‘á»ƒ Ã¡p dá»¥ng.",
         )
         self._subtitle_table.selectRow(row_index)
 
     def _merge_selected_subtitle_row_with_next(self) -> None:
         row_index = self._selected_subtitle_row_index()
         if row_index < 0:
-            QMessageBox.warning(self, "Biên tập phụ đề", "Hãy chọn một dòng để gộp.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "HÃ£y chá»n má»™t dÃ²ng Ä‘á»ƒ gá»™p.")
             return
         try:
             rows = self._collect_subtitle_table_rows()
         except ValueError as exc:
-            QMessageBox.warning(self, "Biên tập phụ đề", str(exc))
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", str(exc))
             return
         if row_index >= len(rows) - 1:
-            QMessageBox.warning(self, "Biên tập phụ đề", "Không có dòng tiếp theo để gộp.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng cÃ³ dÃ²ng tiáº¿p theo Ä‘á»ƒ gá»™p.")
             return
 
         merged = merge_editor_rows(rows[row_index], rows[row_index + 1])
         new_rows = rows[:row_index] + [merged] + rows[row_index + 2 :]
         self._replace_subtitle_editor_rows(
             new_rows,
-            status_message=f"Đã gộp dòng {row_index + 1} với dòng kế tiếp. Hãy lưu để áp dụng.",
+            status_message=f"ÄÃ£ gá»™p dÃ²ng {row_index + 1} vá»›i dÃ²ng káº¿ tiáº¿p. HÃ£y lÆ°u Ä‘á»ƒ Ã¡p dá»¥ng.",
         )
         self._subtitle_table.selectRow(row_index)
 
@@ -4093,8 +4479,8 @@ class MainWindow(QMainWindow):
             self._default_translation_model_input.text().strip() or "gpt-4.1-mini"
         )
         save_settings(self._settings)
-        self._append_log_line("Đã lưu cài đặt")
-        QMessageBox.information(self, "Đã lưu", "Cài đặt ứng dụng đã được lưu.")
+        self._append_log_line("ÄÃ£ lÆ°u cÃ i Ä‘áº·t")
+        QMessageBox.information(self, "ÄÃ£ lÆ°u", "CÃ i Ä‘áº·t á»©ng dá»¥ng Ä‘Ã£ Ä‘Æ°á»£c lÆ°u.")
 
     def _check_ffmpeg(self) -> None:
         installation = detect_ffmpeg_installation(self._settings)
@@ -4108,34 +4494,34 @@ class MainWindow(QMainWindow):
         ]
         text = "\n".join(lines)
         self._ffmpeg_status.setText(text)
-        self._append_log_line("Kiểm tra FFmpeg:\n" + text)
+        self._append_log_line("Kiá»ƒm tra FFmpeg:\n" + text)
 
     def _run_probe_media_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
 
         source_video_path = self._resolve_source_video_path()
         if not source_video_path:
-            QMessageBox.warning(self, "Chưa có video", "Hãy chọn video nguồn hợp lệ.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ video", "HÃ£y chá»n video nguá»“n há»£p lá»‡.")
             return None
 
         workspace = self._current_workspace
         ffprobe_path = self._settings.dependency_paths.ffprobe_path
 
         def handler(context: JobContext) -> JobResult:
-            context.report_progress(5, "Đang đọc metadata bằng ffprobe")
+            context.report_progress(5, "Äang Ä‘á»c metadata báº±ng ffprobe")
             metadata = probe_media(source_video_path, ffprobe_path=ffprobe_path)
             asset = attach_source_video_to_project(workspace, metadata)
-            context.report_progress(100, "Đã cập nhật video nguồn")
+            context.report_progress(100, "ÄÃ£ cáº­p nháº­t video nguá»“n")
             return JobResult(
-                message="Đã đọc metadata video",
+                message="ÄÃ£ Ä‘á»c metadata video",
                 extra={"metadata": metadata, "asset": asset},
             )
 
         return self._job_manager.submit_job(
             stage="probe_media",
-            description="Đọc metadata video nguồn và cập nhật MediaAsset",
+            description="Äá»c metadata video nguá»“n vÃ  cáº­p nháº­t MediaAsset",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -4143,12 +4529,12 @@ class MainWindow(QMainWindow):
 
     def _run_extract_audio_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
 
         source_video_path = self._resolve_source_video_path()
         if not source_video_path:
-            QMessageBox.warning(self, "Chưa có video", "Hãy chọn video nguồn hợp lệ.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ video", "HÃ£y chá»n video nguá»“n há»£p lá»‡.")
             return None
 
         workspace = self._current_workspace
@@ -4159,11 +4545,11 @@ class MainWindow(QMainWindow):
         def handler(context: JobContext) -> JobResult:
             metadata = metadata_hint
             if metadata is None or metadata.source_path != source_video_path.resolve():
-                context.report_progress(2, "Đang đọc thông tin video nguồn")
+                context.report_progress(2, "Äang Ä‘á»c thÃ´ng tin video nguá»“n")
                 metadata = probe_media(source_video_path, ffprobe_path=ffprobe_path)
                 attach_source_video_to_project(workspace, metadata)
             if not metadata.primary_audio_stream:
-                raise RuntimeError("Video không có audio stream để tách.")
+                raise RuntimeError("Video khÃ´ng cÃ³ audio stream Ä‘á»ƒ tÃ¡ch.")
 
             artifacts = extract_audio_artifacts(
                 context,
@@ -4172,14 +4558,14 @@ class MainWindow(QMainWindow):
                 ffmpeg_path=ffmpeg_path,
             )
             return JobResult(
-                message="Đã tách âm thanh 16 kHz và 48 kHz",
+                message="ÄÃ£ tÃ¡ch Ã¢m thanh 16 kHz vÃ  48 kHz",
                 output_paths=[artifacts.audio_16k_path, artifacts.audio_48k_path],
                 extra={"metadata": metadata, "artifacts": artifacts},
             )
 
         return self._job_manager.submit_job(
             stage="extract_audio",
-            description="Tách audio 16 kHz và 48 kHz vào bộ nhớ đệm",
+            description="TÃ¡ch audio 16 kHz vÃ  48 kHz vÃ o bá»™ nhá»› Ä‘á»‡m",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -4187,7 +4573,7 @@ class MainWindow(QMainWindow):
 
     def _run_asr_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
 
         workspace = self._current_workspace
@@ -4195,8 +4581,8 @@ class MainWindow(QMainWindow):
         if not artifacts or not artifacts.audio_16k_path.exists():
             QMessageBox.warning(
                 self,
-                "Chưa có audio cho ASR",
-                "Hãy tách audio trước khi chạy ASR.",
+                "ChÆ°a cÃ³ audio cho ASR",
+                "HÃ£y tÃ¡ch audio trÆ°á»›c khi cháº¡y ASR.",
             )
             return None
 
@@ -4223,14 +4609,14 @@ class MainWindow(QMainWindow):
                 options=options,
             )
             return JobResult(
-                message=f"Đã lưu {persisted.segment_count} phân đoạn ASR",
+                message=f"ÄÃ£ lÆ°u {persisted.segment_count} phÃ¢n Ä‘oáº¡n ASR",
                 output_paths=[persisted.segments_json_path],
                 extra={"result": result, "persisted": persisted},
             )
 
         return self._job_manager.submit_job(
             stage="asr",
-            description="Chạy faster-whisper và lưu phân đoạn vào CSDL",
+            description="Cháº¡y faster-whisper vÃ  lÆ°u phÃ¢n Ä‘oáº¡n vÃ o CSDL",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -4319,15 +4705,15 @@ class MainWindow(QMainWindow):
         ):
             widget.clear()
         if not self._current_workspace:
-            self._review_summary.setText("Chưa có dự án")
+            self._review_summary.setText("ChÆ°a cÃ³ dá»± Ã¡n")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         if self._current_translation_mode(database.get_project()) != "contextual_v2":
-            self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
+            self._review_summary.setText("Dá»± Ã¡n nÃ y Ä‘ang dÃ¹ng cháº¿ Ä‘á»™ dá»‹ch legacy")
             return
         review_rows = database.list_review_queue_items(self._current_workspace.project_id)
         self._review_summary.setText(
-            f"Hàng review semantic: {len(review_rows)} dòng cần duyệt trước TTS/export"
+            f"HÃ ng review semantic: {len(review_rows)} dÃ²ng cáº§n duyá»‡t trÆ°á»›c TTS/export"
         )
         self._review_table.setRowCount(len(review_rows))
         for row_index, row in enumerate(review_rows):
@@ -4419,11 +4805,11 @@ class MainWindow(QMainWindow):
             "\n".join(
                 [
                     f"Scene: {analysis_row['scene_id']}",
-                    f"Tóm tắt scene: {self._review_table.item(current_row, 1).text() if self._review_table.item(current_row, 1) else ''}",
-                    f"Lý do: {', '.join(str(item) for item in review_reason_codes)}",
-                    f"Câu hỏi review: {review_question}",
+                    f"TÃ³m táº¯t scene: {self._review_table.item(current_row, 1).text() if self._review_table.item(current_row, 1) else ''}",
+                    f"LÃ½ do: {', '.join(str(item) for item in review_reason_codes)}",
+                    f"CÃ¢u há»i review: {review_question}",
                     "",
-                    "Ngữ cảnh:",
+                    "Ngá»¯ cáº£nh:",
                     *context_lines,
                 ]
             )
@@ -4432,11 +4818,11 @@ class MainWindow(QMainWindow):
             "\n".join(
                 [
                     f"Scene: {analysis_row['scene_id']}",
-                    f"Tóm tắt scene: {scene_summary}",
-                    f"Lý do: {', '.join(str(item) for item in review_reason_codes)}",
-                    f"Câu hỏi review: {review_question}",
+                    f"TÃ³m táº¯t scene: {scene_summary}",
+                    f"LÃ½ do: {', '.join(str(item) for item in review_reason_codes)}",
+                    f"CÃ¢u há»i review: {review_question}",
                     "",
-                    "Ngữ cảnh:",
+                    "Ngá»¯ cáº£nh:",
                     *context_lines,
                 ]
             )
@@ -4447,11 +4833,11 @@ class MainWindow(QMainWindow):
             "\n".join(
                 [
                     f"Scene: {analysis_row['scene_id']}",
-                    f"Tóm tắt scene: {scene_summary}",
-                    f"Lý do review: {review_reason_text}",
-                    f"Câu hỏi review: {review_question_text}",
+                    f"TÃ³m táº¯t scene: {scene_summary}",
+                    f"LÃ½ do review: {review_reason_text}",
+                    f"CÃ¢u há»i review: {review_question_text}",
                     "",
-                    "Ngữ cảnh:",
+                    "Ngá»¯ cáº£nh:",
                     *context_lines,
                 ]
             )
@@ -4467,7 +4853,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(
                 self,
                 dialog_title,
-                "Chưa có kết quả Contextual V2. Hãy chạy dịch trước khi tiếp tục.",
+                "ChÆ°a cÃ³ káº¿t quáº£ Contextual V2. HÃ£y cháº¡y dá»‹ch trÆ°á»›c khi tiáº¿p tá»¥c.",
             )
             return False
         pending_rows = [
@@ -4482,8 +4868,8 @@ class MainWindow(QMainWindow):
             self,
             dialog_title,
             (
-                f"Không thể tiếp tục vì còn {len(pending_rows)} dòng chưa qua semantic review/QC.\n"
-                "- Hãy xử lý các dòng trong bảng Review Ngữ Cảnh trước khi chạy TTS hoặc export."
+                f"KhÃ´ng thá»ƒ tiáº¿p tá»¥c vÃ¬ cÃ²n {len(pending_rows)} dÃ²ng chÆ°a qua semantic review/QC.\n"
+                "- HÃ£y xá»­ lÃ½ cÃ¡c dÃ²ng trong báº£ng Review Ngá»¯ Cáº£nh trÆ°á»›c khi cháº¡y TTS hoáº·c export."
             ),
         )
         return False
@@ -4507,7 +4893,7 @@ class MainWindow(QMainWindow):
             return
         segment_id = self._pending_review_segment_id
         if not segment_id:
-            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            QMessageBox.warning(self, "Review", "HÃ£y chá»n má»™t dÃ²ng review trÆ°á»›c.")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         try:
@@ -4521,7 +4907,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Review", str(exc))
             return
         if not target_ids:
-            QMessageBox.information(self, "Review", "Không tìm thấy dòng nào phù hợp để chọn.")
+            QMessageBox.information(self, "Review", "KhÃ´ng tÃ¬m tháº¥y dÃ²ng nÃ o phÃ¹ há»£p Ä‘á»ƒ chá»n.")
             return
         target_set = set(target_ids)
         selection_model = self._review_table.selectionModel()
@@ -4553,7 +4939,7 @@ class MainWindow(QMainWindow):
     def _apply_review_resolution_to_selected_rows(self) -> None:
         selected_segment_ids = self._selected_review_segment_ids()
         if not selected_segment_ids:
-            QMessageBox.warning(self, "Review", "Hãy chọn ít nhất một dòng review trước.")
+            QMessageBox.warning(self, "Review", "HÃ£y chá»n Ã­t nháº¥t má»™t dÃ²ng review trÆ°á»›c.")
             return
         self._run_review_resolution(scope="line", explicit_segment_ids=selected_segment_ids)
 
@@ -4562,7 +4948,7 @@ class MainWindow(QMainWindow):
             return
         segment_id = self._pending_review_segment_id
         if not segment_id:
-            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            QMessageBox.warning(self, "Review", "HÃ£y chá»n má»™t dÃ²ng review trÆ°á»›c.")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         project_row = database.get_project()
@@ -4600,7 +4986,7 @@ class MainWindow(QMainWindow):
             return
         segment_id = self._pending_review_segment_id
         if not segment_id:
-            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            QMessageBox.warning(self, "Review", "HÃ£y chá»n má»™t dÃ²ng review trÆ°á»›c.")
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         analysis_row = database.get_segment_analysis(self._current_workspace.project_id, segment_id)
@@ -4741,7 +5127,7 @@ class MainWindow(QMainWindow):
 
     def _run_translation_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         workspace = self._current_workspace
         database = ProjectDatabase(workspace.database_path)
@@ -4749,10 +5135,10 @@ class MainWindow(QMainWindow):
         segments = database.list_segments(workspace.project_id)
         template = self._selected_prompt_template()
         if not project_row or not segments:
-            QMessageBox.warning(self, "Chưa có phân đoạn", "Hãy chạy ASR trước khi dịch.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ phÃ¢n Ä‘oáº¡n", "HÃ£y cháº¡y ASR trÆ°á»›c khi dá»‹ch.")
             return None
         if not template:
-            QMessageBox.warning(self, "Chưa có prompt", "Không tìm thấy prompt template trong dự án.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ prompt", "KhÃ´ng tÃ¬m tháº¥y prompt template trong dá»± Ã¡n.")
             return None
 
         source_language = segments[0]["source_lang"] or project_row["source_language"] or "auto"
@@ -4794,9 +5180,9 @@ class MainWindow(QMainWindow):
                         project_id=workspace.project_id,
                         target_language=target_language,
                     )
-                    context.report_progress(100, "Dùng lại cache Contextual V2")
+                    context.report_progress(100, "DÃ¹ng láº¡i cache Contextual V2")
                     return JobResult(
-                        message="Dùng cache Contextual V2",
+                        message="DÃ¹ng cache Contextual V2",
                         output_paths=[cache_path],
                         extra={
                             "translated_count": len(database.list_segment_analyses(workspace.project_id)),
@@ -4829,7 +5215,7 @@ class MainWindow(QMainWindow):
                     analyses=contextual_result["segment_analyses"],
                 )
                 return JobResult(
-                    message=f"Đã chạy Contextual V2 cho {len(contextual_result['segment_analyses'])} phân đoạn",
+                    message=f"ÄÃ£ cháº¡y Contextual V2 cho {len(contextual_result['segment_analyses'])} phÃ¢n Ä‘oáº¡n",
                     output_paths=[cache_path],
                     extra={
                         "translated_count": len(contextual_result["segment_analyses"]),
@@ -4843,10 +5229,10 @@ class MainWindow(QMainWindow):
             cached = load_cached_translations(workspace, stage_hash)
             if cached:
                 database.apply_segment_translations(workspace.project_id, cached)
-                context.report_progress(100, "Dùng lại cache bản dịch")
+                context.report_progress(100, "DÃ¹ng láº¡i cache báº£n dá»‹ch")
                 cache_path = workspace.cache_dir / "translate" / stage_hash / "segments_translated.json"
                 return JobResult(
-                    message=f"Dùng cache bản dịch cho {len(cached)} phân đoạn",
+                    message=f"DÃ¹ng cache báº£n dá»‹ch cho {len(cached)} phÃ¢n Ä‘oáº¡n",
                     output_paths=[cache_path],
                     extra={
                         "translated_count": len(cached),
@@ -4873,7 +5259,7 @@ class MainWindow(QMainWindow):
                 target_language=target_language,
             )
             return JobResult(
-                message=f"Đã dịch {len(translated_items)} phân đoạn",
+                message=f"ÄÃ£ dá»‹ch {len(translated_items)} phÃ¢n Ä‘oáº¡n",
                 output_paths=[cache_path],
                 extra={
                     "translated_count": len(translated_items),
@@ -4884,7 +5270,7 @@ class MainWindow(QMainWindow):
 
         return self._job_manager.submit_job(
             stage="translate",
-            description="Dịch phân đoạn bằng OpenAI Structured Outputs",
+            description="Dá»‹ch phÃ¢n Ä‘oáº¡n báº±ng OpenAI Structured Outputs",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -4892,20 +5278,20 @@ class MainWindow(QMainWindow):
 
     def _run_tts_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "TTS", "Không thể lưu chỉnh sửa phụ đề trước khi chạy TTS.")
+            QMessageBox.warning(self, "TTS", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi cháº¡y TTS.")
             return None
         workspace = self._current_workspace
         preset = self._selected_voice_preset()
         if not preset:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy preset giọng trong dự án.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y preset giá»ng trong dá»± Ã¡n.")
             return None
 
         database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR và dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR vÃ  dá»‹ch trÆ°á»›c.")
             return None
         if not self._ensure_localized_rows_ready(
             database,
@@ -4930,11 +5316,7 @@ class MainWindow(QMainWindow):
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
-            segment_voice_preset_ids=(
-                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
-                if segment_voice_presets
-                else None
-            ),
+            segment_voice_presets=segment_voice_presets,
         )
 
         def handler(context: JobContext) -> JobResult:
@@ -4952,9 +5334,9 @@ class MainWindow(QMainWindow):
                         for item in cached.artifacts
                     ],
                 )
-                context.report_progress(100, "Dùng lại cache clip TTS")
+                context.report_progress(100, "DÃ¹ng láº¡i cache clip TTS")
                 return JobResult(
-                    message=f"Dùng cache TTS cho {len(cached.artifacts)} phân đoạn",
+                    message=f"DÃ¹ng cache TTS cho {len(cached.artifacts)} phÃ¢n Ä‘oáº¡n",
                     output_paths=[cached.manifest_path],
                     extra={
                         "manifest_path": cached.manifest_path,
@@ -4986,7 +5368,7 @@ class MainWindow(QMainWindow):
                 ],
             )
             return JobResult(
-                message=f"Đã tạo {len(synthesized.artifacts)} clip TTS",
+                message=f"ÄÃ£ táº¡o {len(synthesized.artifacts)} clip TTS",
                 output_paths=[synthesized.manifest_path],
                 extra={
                     "manifest_path": synthesized.manifest_path,
@@ -4997,7 +5379,7 @@ class MainWindow(QMainWindow):
 
         return self._job_manager.submit_job(
             stage="tts",
-            description="Tạo clip TTS từ nội dung phụ đề hoặc lời đọc",
+            description="Táº¡o clip TTS tá»« ná»™i dung phá»¥ Ä‘á» hoáº·c lá»i Ä‘á»c",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -5005,36 +5387,36 @@ class MainWindow(QMainWindow):
 
     def _run_build_voice_track_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "Track giọng", "Không thể lưu chỉnh sửa phụ đề trước khi tạo track giọng.")
+            QMessageBox.warning(self, "Track giá»ng", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi táº¡o track giá»ng.")
             return None
         workspace = self._current_workspace
         preset = self._selected_voice_preset()
         if not preset:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy preset giọng trong dự án.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y preset giá»ng trong dá»± Ã¡n.")
             return None
 
         database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR và dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR vÃ  dá»‹ch trÆ°á»›c.")
             return None
         if not self._ensure_localized_rows_ready(
             database,
             subtitle_rows,
             purpose="tts",
-            dialog_title="Track giọng",
+            dialog_title="Track giá»ng",
         ):
             return None
-        if not self._ensure_contextual_semantic_ready(database, dialog_title="Track giọng"):
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Track giá»ng"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
         preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
             database,
             subtitle_rows,
             require_localized=require_localized,
-            dialog_title="Track giọng",
+            dialog_title="Track giá»ng",
             warn_on_unresolved=True,
         )
         if preset is None:
@@ -5043,15 +5425,11 @@ class MainWindow(QMainWindow):
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
-            segment_voice_preset_ids=(
-                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
-                if segment_voice_presets
-                else None
-            ),
+            segment_voice_presets=segment_voice_presets,
         )
         cached = load_synthesized_segments(workspace, stage_hash)
         if not cached:
-            QMessageBox.warning(self, "TTS", "Hãy chạy TTS trước khi tạo track giọng.")
+            QMessageBox.warning(self, "TTS", "HÃ£y cháº¡y TTS trÆ°á»›c khi táº¡o track giá»ng.")
             return None
         missing_artifact_indexes = self._missing_tts_artifact_row_indexes(
             subtitle_rows,
@@ -5062,11 +5440,11 @@ class MainWindow(QMainWindow):
             self._focus_subtitle_table_row(missing_artifact_indexes[0])
             QMessageBox.warning(
                 self,
-                "Track giọng",
+                "Track giá»ng",
                 (
-                    "Cache TTS hiện tại chưa đủ cho toàn bộ dòng cần đọc.\n"
-                    f"- Dòng thiếu clip: {self._format_row_number_list(missing_artifact_indexes)}\n"
-                    "- Hãy chạy lại TTS sau khi hoàn tất nội dung tiếng đích."
+                    "Cache TTS hiá»‡n táº¡i chÆ°a Ä‘á»§ cho toÃ n bá»™ dÃ²ng cáº§n Ä‘á»c.\n"
+                    f"- DÃ²ng thiáº¿u clip: {self._format_row_number_list(missing_artifact_indexes)}\n"
+                    "- HÃ£y cháº¡y láº¡i TTS sau khi hoÃ n táº¥t ná»™i dung tiáº¿ng Ä‘Ã­ch."
                 ),
             )
             return None
@@ -5098,7 +5476,7 @@ class MainWindow(QMainWindow):
                 ],
             )
             return JobResult(
-                message="Đã tạo track giọng",
+                message="ÄÃ£ táº¡o track giá»ng",
                 output_paths=[result.manifest_path, result.voice_track_path],
                 extra={
                     "voice_track_path": result.voice_track_path,
@@ -5109,7 +5487,7 @@ class MainWindow(QMainWindow):
 
         return self._job_manager.submit_job(
             stage="voice_track",
-            description="Căn chỉnh clip TTS theo timeline và tạo track giọng",
+            description="CÄƒn chá»‰nh clip TTS theo timeline vÃ  táº¡o track giá»ng",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -5117,42 +5495,42 @@ class MainWindow(QMainWindow):
 
     def _run_mixdown_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "Trộn âm thanh", "Không thể lưu chỉnh sửa phụ đề trước khi trộn âm thanh.")
+            QMessageBox.warning(self, "Trá»™n Ã¢m thanh", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi trá»™n Ã¢m thanh.")
             return None
         workspace = self._current_workspace
         artifacts = self._audio_artifacts or load_cached_audio_artifacts(workspace)
         if not artifacts or not artifacts.audio_48k_path.exists():
-            QMessageBox.warning(self, "Chưa có audio 48 kHz", "Hãy tách âm thanh trước khi trộn.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ audio 48 kHz", "HÃ£y tÃ¡ch Ã¢m thanh trÆ°á»›c khi trá»™n.")
             return None
         database, _active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR và dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR vÃ  dá»‹ch trÆ°á»›c.")
             return None
         preset = self._selected_voice_preset()
         if not preset:
-            QMessageBox.warning(self, "Preset giọng", "Không tìm thấy preset giọng trong dự án.")
+            QMessageBox.warning(self, "Preset giá»ng", "KhÃ´ng tÃ¬m tháº¥y preset giá»ng trong dá»± Ã¡n.")
             return None
         if not self._ensure_localized_rows_ready(
             database,
             subtitle_rows,
             purpose="tts",
-            dialog_title="Trộn âm thanh",
+            dialog_title="Trá»™n Ã¢m thanh",
         ):
             return None
-        if not self._ensure_contextual_semantic_ready(database, dialog_title="Trộn âm thanh"):
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Trá»™n Ã¢m thanh"):
             return None
         if not self._last_voice_track_output or not self._last_voice_track_output.exists():
-            QMessageBox.warning(self, "Chưa có track giọng", "Hãy tạo track giọng trước khi trộn âm thanh.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track giá»ng", "HÃ£y táº¡o track giá»ng trÆ°á»›c khi trá»™n Ã¢m thanh.")
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
         preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
             database,
             subtitle_rows,
             require_localized=require_localized,
-            dialog_title="Trộn âm thanh",
+            dialog_title="Trá»™n Ã¢m thanh",
             warn_on_unresolved=True,
         )
         if preset is None:
@@ -5161,15 +5539,11 @@ class MainWindow(QMainWindow):
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
-            segment_voice_preset_ids=(
-                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
-                if segment_voice_presets
-                else None
-            ),
+            segment_voice_presets=segment_voice_presets,
         )
         cached = load_synthesized_segments(workspace, stage_hash)
         if not cached:
-            QMessageBox.warning(self, "Trộn âm thanh", "Không tìm thấy cache TTS hiện tại. Hãy chạy lại TTS.")
+            QMessageBox.warning(self, "Trá»™n Ã¢m thanh", "KhÃ´ng tÃ¬m tháº¥y cache TTS hiá»‡n táº¡i. HÃ£y cháº¡y láº¡i TTS.")
             return None
         missing_artifact_indexes = self._missing_tts_artifact_row_indexes(
             subtitle_rows,
@@ -5180,11 +5554,11 @@ class MainWindow(QMainWindow):
             self._focus_subtitle_table_row(missing_artifact_indexes[0])
             QMessageBox.warning(
                 self,
-                "Trộn âm thanh",
+                "Trá»™n Ã¢m thanh",
                 (
-                    "Track giọng hiện tại không còn khớp với nội dung TTS.\n"
-                    f"- Dòng thiếu clip: {self._format_row_number_list(missing_artifact_indexes)}\n"
-                    "- Hãy chạy lại TTS rồi tạo lại track giọng trước khi trộn."
+                    "Track giá»ng hiá»‡n táº¡i khÃ´ng cÃ²n khá»›p vá»›i ná»™i dung TTS.\n"
+                    f"- DÃ²ng thiáº¿u clip: {self._format_row_number_list(missing_artifact_indexes)}\n"
+                    "- HÃ£y cháº¡y láº¡i TTS rá»“i táº¡o láº¡i track giá»ng trÆ°á»›c khi trá»™n."
                 ),
             )
             return None
@@ -5200,14 +5574,14 @@ class MainWindow(QMainWindow):
         if expected_voice_track_path.resolve() != self._last_voice_track_output.resolve():
             QMessageBox.warning(
                 self,
-                "Trộn âm thanh",
+                "Trá»™n Ã¢m thanh",
                 (
-                    "Track giọng hiện tại không còn đồng bộ với phụ đề hoặc preset giọng.\n"
-                    "- Hãy tạo lại track giọng trước khi trộn âm thanh."
+                    "Track giá»ng hiá»‡n táº¡i khÃ´ng cÃ²n Ä‘á»“ng bá»™ vá»›i phá»¥ Ä‘á» hoáº·c preset giá»ng.\n"
+                    "- HÃ£y táº¡o láº¡i track giá»ng trÆ°á»›c khi trá»™n Ã¢m thanh."
                 ),
             )
             return None
-        mixdown_inputs = self._current_mixdown_inputs_or_warn(dialog_title="Trộn âm thanh")
+        mixdown_inputs = self._current_mixdown_inputs_or_warn(dialog_title="Trá»™n Ã¢m thanh")
         if mixdown_inputs is None:
             return None
         original_volume, voice_volume, bgm_path, bgm_volume = mixdown_inputs
@@ -5226,14 +5600,14 @@ class MainWindow(QMainWindow):
                 bgm_volume=bgm_volume,
             )
             return JobResult(
-                message="Đã trộn âm thanh",
+                message="ÄÃ£ trá»™n Ã¢m thanh",
                 output_paths=[result.manifest_path, result.mixed_audio_path],
                 extra={"mixed_audio_path": result.mixed_audio_path, "manifest_path": result.manifest_path},
             )
 
         return self._job_manager.submit_job(
             stage="mixdown",
-            description="Trộn track giọng với âm thanh gốc và BGM tùy chọn",
+            description="Trá»™n track giá»ng vá»›i Ã¢m thanh gá»‘c vÃ  BGM tÃ¹y chá»n",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -5241,36 +5615,36 @@ class MainWindow(QMainWindow):
 
     def _run_export_subtitles_job(self, format_name: str) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "Biên tập phụ đề", "Không thể lưu chỉnh sửa phụ đề trước khi xuất file.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi xuáº¥t file.")
             return None
         workspace = self._current_workspace
         database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR hoặc dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR hoáº·c dá»‹ch trÆ°á»›c.")
             return None
         if not self._ensure_localized_rows_ready(
             database,
             subtitle_rows,
             purpose="subtitle",
-            dialog_title=f"Xuất {format_name.upper()}",
+            dialog_title=f"Xuáº¥t {format_name.upper()}",
         ):
             return None
         if not self._ensure_contextual_semantic_ready(
             database,
-            dialog_title=f"Xuất {format_name.upper()}",
+            dialog_title=f"Xuáº¥t {format_name.upper()}",
         ):
             return None
-        if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title=f"Xuất {format_name.upper()}"):
+        if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title=f"Xuáº¥t {format_name.upper()}"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
 
         def handler(context: JobContext) -> JobResult:
             context.report_progress(
                 10,
-                f"Đang tạo {format_name.upper()} từ {self._subtitle_track_label(active_track)}",
+                f"Äang táº¡o {format_name.upper()} tá»« {self._subtitle_track_label(active_track)}",
             )
             output_path = export_subtitles(
                 workspace,
@@ -5278,16 +5652,16 @@ class MainWindow(QMainWindow):
                 format_name=format_name,
                 allow_source_fallback=not require_localized,
             )
-            context.report_progress(100, f"Đã tạo {format_name.upper()}")
+            context.report_progress(100, f"ÄÃ£ táº¡o {format_name.upper()}")
             return JobResult(
-                message=f"Đã xuất {format_name.upper()}",
+                message=f"ÄÃ£ xuáº¥t {format_name.upper()}",
                 output_paths=[output_path],
                 extra={"format_name": format_name, "output_path": output_path},
             )
 
         return self._job_manager.submit_job(
             stage=f"export_{format_name}",
-            description=f"Xuất phụ đề {format_name.upper()}",
+            description=f"Xuáº¥t phá»¥ Ä‘á» {format_name.upper()}",
             handler=handler,
             project_id=workspace.project_id,
             project_db_path=workspace.database_path,
@@ -5295,47 +5669,47 @@ class MainWindow(QMainWindow):
 
     def _run_video_export_job(self) -> str | None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
         if not self._save_subtitle_edits(silent=True):
-            QMessageBox.warning(self, "Biên tập phụ đề", "Không thể lưu chỉnh sửa phụ đề trước khi xuất video.")
+            QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi xuáº¥t video.")
             return None
 
         workspace = self._current_workspace
         source_video_path = self._resolve_source_video_path()
         if not source_video_path:
-            QMessageBox.warning(self, "Chưa có video", "Hãy chọn video nguồn hợp lệ.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ video", "HÃ£y chá»n video nguá»“n há»£p lá»‡.")
             return None
         try:
             export_preset = self._selected_export_preset(strict=True)
         except ValueError as exc:
-            QMessageBox.warning(self, "Preset xuất", str(exc))
+            QMessageBox.warning(self, "Preset xuáº¥t", str(exc))
             return None
         if not export_preset:
-            QMessageBox.warning(self, "Preset xuất", "Không tìm thấy preset xuất trong dự án.")
+            QMessageBox.warning(self, "Preset xuáº¥t", "KhÃ´ng tÃ¬m tháº¥y preset xuáº¥t trong dá»± Ã¡n.")
             return None
 
         database, active_track, subtitle_rows = self._load_active_subtitle_track_rows()
         if not subtitle_rows:
-            QMessageBox.warning(self, "Chưa có track phụ đề", "Hãy chạy ASR và dịch trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ track phá»¥ Ä‘á»", "HÃ£y cháº¡y ASR vÃ  dá»‹ch trÆ°á»›c.")
             return None
         if not self._ensure_localized_rows_ready(
             database,
             subtitle_rows,
             purpose="subtitle",
-            dialog_title="Xuất video",
+            dialog_title="Xuáº¥t video",
         ):
             return None
-        if not self._ensure_contextual_semantic_ready(database, dialog_title="Xuất video"):
+        if not self._ensure_contextual_semantic_ready(database, dialog_title="Xuáº¥t video"):
             return None
-        if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title="Xuất video"):
+        if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title="Xuáº¥t video"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
         preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
             database,
             subtitle_rows,
             require_localized=require_localized,
-            dialog_title="Xuất video",
+            dialog_title="Xuáº¥t video",
             warn_on_unresolved=True,
         )
         if preset is None:
@@ -5349,8 +5723,8 @@ class MainWindow(QMainWindow):
             if not preset:
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
-                    "Không tìm thấy preset giọng hiện tại. Hãy chọn lại preset rồi tạo lại track giọng trước khi xuất video.",
+                    "Xuáº¥t video",
+                    "KhÃ´ng tÃ¬m tháº¥y preset giá»ng hiá»‡n táº¡i. HÃ£y chá»n láº¡i preset rá»“i táº¡o láº¡i track giá»ng trÆ°á»›c khi xuáº¥t video.",
                 )
                 return None
             total_duration_ms = duration_ms or max(int(row["end_ms"]) for row in subtitle_rows)
@@ -5360,31 +5734,27 @@ class MainWindow(QMainWindow):
                 preset=preset,
                 total_duration_ms=total_duration_ms,
                 require_localized=require_localized,
-                segment_voice_preset_ids=(
-                    {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
-                    if segment_voice_presets
-                    else None
-                ),
+                segment_voice_presets=segment_voice_presets,
             )
             if missing_tts_indexes:
                 self._focus_subtitle_table_row(missing_tts_indexes[0])
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
+                    "Xuáº¥t video",
                     (
-                        "Track giọng hiện tại không còn khớp với track phụ đề đang active.\n"
-                        f"- Dòng thiếu clip TTS: {self._format_row_number_list(missing_tts_indexes)}\n"
-                        "- Hãy chạy lại TTS, tạo track giọng và trộn âm thanh trước khi xuất video."
+                        "Track giá»ng hiá»‡n táº¡i khÃ´ng cÃ²n khá»›p vá»›i track phá»¥ Ä‘á» Ä‘ang active.\n"
+                        f"- DÃ²ng thiáº¿u clip TTS: {self._format_row_number_list(missing_tts_indexes)}\n"
+                        "- HÃ£y cháº¡y láº¡i TTS, táº¡o track giá»ng vÃ  trá»™n Ã¢m thanh trÆ°á»›c khi xuáº¥t video."
                     ),
                 )
                 return None
             if expected_voice_track_path is None or expected_voice_track_path.resolve() != self._last_voice_track_output.resolve():
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
+                    "Xuáº¥t video",
                     (
-                        "Track giọng hiện tại không còn đồng bộ với phụ đề hoặc preset giọng.\n"
-                        "- Hãy tạo lại track giọng rồi trộn âm thanh trước khi xuất video."
+                        "Track giá»ng hiá»‡n táº¡i khÃ´ng cÃ²n Ä‘á»“ng bá»™ vá»›i phá»¥ Ä‘á» hoáº·c preset giá»ng.\n"
+                        "- HÃ£y táº¡o láº¡i track giá»ng rá»“i trá»™n Ã¢m thanh trÆ°á»›c khi xuáº¥t video."
                     ),
                 )
                 return None
@@ -5392,11 +5762,11 @@ class MainWindow(QMainWindow):
             if not artifacts or not artifacts.audio_48k_path.exists():
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
-                    "Đã có track giọng nhưng chưa có audio 48 kHz để trộn. Hãy chạy Chuẩn bị media rồi trộn âm thanh trước.",
+                    "Xuáº¥t video",
+                    "ÄÃ£ cÃ³ track giá»ng nhÆ°ng chÆ°a cÃ³ audio 48 kHz Ä‘á»ƒ trá»™n. HÃ£y cháº¡y Chuáº©n bá»‹ media rá»“i trá»™n Ã¢m thanh trÆ°á»›c.",
                 )
                 return None
-            mixdown_inputs = self._current_mixdown_inputs_or_warn(dialog_title="Xuất video")
+            mixdown_inputs = self._current_mixdown_inputs_or_warn(dialog_title="Xuáº¥t video")
             if mixdown_inputs is None:
                 return None
             original_volume, voice_volume, bgm_path, bgm_volume = mixdown_inputs
@@ -5412,17 +5782,17 @@ class MainWindow(QMainWindow):
             if not self._last_mixed_audio_output or not self._last_mixed_audio_output.exists():
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
-                    "Đã có track giọng nhưng chưa có âm thanh đã trộn. Hãy chạy Trộn âm thanh trước khi xuất video.",
+                    "Xuáº¥t video",
+                    "ÄÃ£ cÃ³ track giá»ng nhÆ°ng chÆ°a cÃ³ Ã¢m thanh Ä‘Ã£ trá»™n. HÃ£y cháº¡y Trá»™n Ã¢m thanh trÆ°á»›c khi xuáº¥t video.",
                 )
                 return None
             if expected_mixed_audio_path.resolve() != self._last_mixed_audio_output.resolve():
                 QMessageBox.warning(
                     self,
-                    "Xuất video",
+                    "Xuáº¥t video",
                     (
-                        "Âm thanh đã trộn hiện tại không còn đồng bộ với track giọng, mức âm lượng hoặc BGM.\n"
-                        "- Hãy chạy lại Trộn âm thanh trước khi xuất video."
+                        "Ã‚m thanh Ä‘Ã£ trá»™n hiá»‡n táº¡i khÃ´ng cÃ²n Ä‘á»“ng bá»™ vá»›i track giá»ng, má»©c Ã¢m lÆ°á»£ng hoáº·c BGM.\n"
+                        "- HÃ£y cháº¡y láº¡i Trá»™n Ã¢m thanh trÆ°á»›c khi xuáº¥t video."
                     ),
                 )
                 return None
@@ -5434,7 +5804,7 @@ class MainWindow(QMainWindow):
         def handler(context: JobContext) -> JobResult:
             context.report_progress(
                 5,
-                f"Đang tạo {subtitle_format.upper()} cho {self._subtitle_track_label(active_track)}",
+                f"Äang táº¡o {subtitle_format.upper()} cho {self._subtitle_track_label(active_track)}",
             )
             subtitle_path = export_subtitles(
                 workspace,
@@ -5454,7 +5824,7 @@ class MainWindow(QMainWindow):
                 export_preset_id=export_preset.export_preset_id,
             )
             return JobResult(
-                message=f"Đã xuất video {export_mode_label}",
+                message=f"ÄÃ£ xuáº¥t video {export_mode_label}",
                 output_paths=[subtitle_path, output_path],
                 extra={
                     "subtitle_path": subtitle_path,
@@ -5472,9 +5842,9 @@ class MainWindow(QMainWindow):
         return self._job_manager.submit_job(
             stage="export_video",
             description=(
-                "Ghi cứng ASS vào video nguồn bằng FFmpeg"
+                "Ghi cá»©ng ASS vÃ o video nguá»“n báº±ng FFmpeg"
                 if export_preset.burn_subtitles
-                else "Gắn track phụ đề vào video nguồn bằng FFmpeg"
+                else "Gáº¯n track phá»¥ Ä‘á» vÃ o video nguá»“n báº±ng FFmpeg"
             ),
             handler=handler,
             project_id=workspace.project_id,
@@ -5486,19 +5856,19 @@ class MainWindow(QMainWindow):
 
     def _run_smoke_job(self) -> None:
         if not self._current_workspace:
-            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return
 
         def smoke_handler(context: JobContext) -> JobResult:
             for progress in range(0, 101, 10):
                 context.cancellation_token.raise_if_canceled()
-                context.report_progress(progress, f"Kiểm tra tiến trình {progress}%")
+                context.report_progress(progress, f"Kiá»ƒm tra tiáº¿n trÃ¬nh {progress}%")
                 context.sleep_with_cancel(0.15)
-            return JobResult(message="Tác vụ kiểm tra đã hoàn tất")
+            return JobResult(message="TÃ¡c vá»¥ kiá»ƒm tra Ä‘Ã£ hoÃ n táº¥t")
 
         self._job_manager.submit_job(
             stage="smoke",
-            description="Kiểm tra hàng đợi tác vụ, tiến trình và thao tác hủy",
+            description="Kiá»ƒm tra hÃ ng Ä‘á»£i tÃ¡c vá»¥, tiáº¿n trÃ¬nh vÃ  thao tÃ¡c há»§y",
             handler=smoke_handler,
             project_id=self._current_workspace.project_id,
             project_db_path=self._current_workspace.database_path,
@@ -5537,18 +5907,18 @@ class MainWindow(QMainWindow):
             return
         if self._workflow_current_stage != stage:
             return
-        status_label = "thất bại" if status == JobStatus.FAILED.value else "đã bị hủy"
+        status_label = "tháº¥t báº¡i" if status == JobStatus.FAILED.value else "Ä‘Ã£ bá»‹ há»§y"
         self._stop_workflow(
             message=(
-                f"Quy trình nhanh dừng lại: bước {self._workflow_stage_label(stage)} {status_label}.\n"
-                f"- Thông báo: {message or '-'}"
+                f"Quy trÃ¬nh nhanh dá»«ng láº¡i: bÆ°á»›c {self._workflow_stage_label(stage)} {status_label}.\n"
+                f"- ThÃ´ng bÃ¡o: {message or '-'}"
             ),
         )
 
     def _handle_retry_requested(self, job_id: str) -> None:
         new_job_id = self._job_manager.retry_job(job_id)
         if not new_job_id:
-            QMessageBox.warning(self, "Không thể chạy lại", "Không tìm thấy job gốc.")
+            QMessageBox.warning(self, "KhÃ´ng thá»ƒ cháº¡y láº¡i", "KhÃ´ng tÃ¬m tháº¥y job gá»‘c.")
             return
         self._append_log_line(f"Retry job {job_id} -> {new_job_id}")
 
@@ -5574,15 +5944,15 @@ class MainWindow(QMainWindow):
             persisted = extra.get("persisted")
             if persisted:
                 self._asr_summary.setText(
-                    "ASR hoàn tất:\n"
-                    f"- Số phân đoạn: {persisted.segment_count}\n"
+                    "ASR hoÃ n táº¥t:\n"
+                    f"- Sá»‘ phÃ¢n Ä‘oáº¡n: {persisted.segment_count}\n"
                     f"- Cache: {persisted.cache_dir}\n"
                     f"- JSON: {persisted.segments_json_path}"
                 )
             else:
                 database = ProjectDatabase(self._current_workspace.database_path)
                 self._asr_summary.setText(
-                    f"ASR hoàn tất, số phân đoạn trong CSDL: {database.count_segments(self._current_workspace.project_id)}"
+                    f"ASR hoÃ n táº¥t, sá»‘ phÃ¢n Ä‘oáº¡n trong CSDL: {database.count_segments(self._current_workspace.project_id)}"
                 )
             self._reload_subtitle_editor_from_db(force=True)
         elif stage == "translate" and self._current_workspace:
@@ -5592,16 +5962,16 @@ class MainWindow(QMainWindow):
             pending_review_count = extra.get("pending_review_count")
             semantic_qc = extra.get("semantic_qc") or {}
             summary_lines = [
-                "Dịch hoàn tất:",
-                f"- Chế độ: {translation_mode}",
-                f"- Số dòng đã dịch: {translated_count}",
+                "Dá»‹ch hoÃ n táº¥t:",
+                f"- Cháº¿ Ä‘á»™: {translation_mode}",
+                f"- Sá»‘ dÃ²ng Ä‘Ã£ dá»‹ch: {translated_count}",
                 f"- Cache: {cache_path}",
             ]
             if pending_review_count is not None:
-                summary_lines.append(f"- Dòng cần review: {pending_review_count}")
+                summary_lines.append(f"- DÃ²ng cáº§n review: {pending_review_count}")
             if semantic_qc:
                 summary_lines.append(
-                    f"- Semantic QC: {semantic_qc.get('error_count', 0)} lỗi, {semantic_qc.get('warning_count', 0)} cảnh báo"
+                    f"- Semantic QC: {semantic_qc.get('error_count', 0)} lá»—i, {semantic_qc.get('warning_count', 0)} cáº£nh bÃ¡o"
                 )
             self._translation_summary.setText(
                 "\n".join(summary_lines)
@@ -5648,15 +6018,15 @@ class MainWindow(QMainWindow):
         video_row = database.get_primary_video_asset(self._current_workspace.project_id)
         if video_row:
             self._media_summary.setText(
-                "Video nguồn:\n"
-                f"- Đường dẫn: {video_row['path']}\n"
-                f"- Thời lượng: {video_row['duration_ms']} ms\n"
-                f"- Độ phân giải: {video_row['width']}x{video_row['height']}\n"
+                "Video nguá»“n:\n"
+                f"- ÄÆ°á»ng dáº«n: {video_row['path']}\n"
+                f"- Thá»i lÆ°á»£ng: {video_row['duration_ms']} ms\n"
+                f"- Äá»™ phÃ¢n giáº£i: {video_row['width']}x{video_row['height']}\n"
                 f"- FPS: {video_row['fps']}\n"
-                f"- Âm thanh: {video_row['audio_channels']} kênh @ {video_row['sample_rate']} Hz"
+                f"- Ã‚m thanh: {video_row['audio_channels']} kÃªnh @ {video_row['sample_rate']} Hz"
             )
         else:
-            self._media_summary.setText("Chưa có video nguồn")
+            self._media_summary.setText("ChÆ°a cÃ³ video nguá»“n")
 
         segment_rows = database.list_segments(self._current_workspace.project_id)
         segment_count = len(segment_rows)
@@ -5691,13 +6061,13 @@ class MainWindow(QMainWindow):
         )
         if self._audio_artifacts:
             self._asr_summary.setText(
-                "Bộ nhớ đệm âm thanh sẵn sàng:\n"
+                "Bá»™ nhá»› Ä‘á»‡m Ã¢m thanh sáºµn sÃ ng:\n"
                 f"- ASR 16 kHz: {self._audio_artifacts.audio_16k_path}\n"
                 f"- Mix 48 kHz: {self._audio_artifacts.audio_48k_path}\n"
-                f"- Phân đoạn trong CSDL: {segment_count}"
+                f"- PhÃ¢n Ä‘oáº¡n trong CSDL: {segment_count}"
             )
         else:
-            self._asr_summary.setText(f"Chưa có cache âm thanh. Phân đoạn trong CSDL: {segment_count}")
+            self._asr_summary.setText(f"ChÆ°a cÃ³ cache Ã¢m thanh. PhÃ¢n Ä‘oáº¡n trong CSDL: {segment_count}")
         target_language = project_row["target_language"] if project_row else "-"
         translation_mode = self._current_translation_mode(project_row)
         pending_review_count = (
@@ -5706,23 +6076,23 @@ class MainWindow(QMainWindow):
             else 0
         )
         self._translation_summary.setText(
-            "Trạng thái dịch:\n"
-            f"- Chế độ: {translation_mode}\n"
-            f"- Ngôn ngữ đích: {target_language}\n"
-            f"- Mẫu prompt: {len(self._prompt_templates)}\n"
-            f"- Đã dịch: {translated_count}/{segment_count}\n"
-            f"- Dòng cần review: {pending_review_count}"
+            "Tráº¡ng thÃ¡i dá»‹ch:\n"
+            f"- Cháº¿ Ä‘á»™: {translation_mode}\n"
+            f"- NgÃ´n ngá»¯ Ä‘Ã­ch: {target_language}\n"
+            f"- Máº«u prompt: {len(self._prompt_templates)}\n"
+            f"- ÄÃ£ dá»‹ch: {translated_count}/{segment_count}\n"
+            f"- DÃ²ng cáº§n review: {pending_review_count}"
         )
         if translation_mode == "contextual_v2":
             self._review_summary.setText(
-                f"Hàng review semantic: {pending_review_count} dòng cần duyệt trước TTS/export"
+                f"HÃ ng review semantic: {pending_review_count} dÃ²ng cáº§n duyá»‡t trÆ°á»›c TTS/export"
             )
         else:
-            self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
+            self._review_summary.setText("Dá»± Ã¡n nÃ y Ä‘ang dÃ¹ng cháº¿ Ä‘á»™ dá»‹ch legacy")
 
         current_preset = self._selected_voice_preset()
         resolved_preset = current_preset
-        segment_voice_preset_ids: dict[str, str] | None = None
+        segment_voice_presets: dict[str, object] | None = None
         speaker_binding_lines: list[str] = []
         voice_binding_ready = True
         if database and subtitle_rows:
@@ -5730,42 +6100,45 @@ class MainWindow(QMainWindow):
                 database,
                 subtitle_rows,
                 require_localized=require_localized,
-                dialog_title="Lá»“ng tiáº¿ng",
+                dialog_title="LÃ¡Â»â€œng tiÃ¡ÂºÂ¿ng",
                 warn_on_unresolved=False,
             )
             if voice_plan is not None:
-                segment_voice_preset_ids = (
-                    {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
-                    if segment_voice_presets
-                    else None
-                )
                 if getattr(voice_plan, "active_bindings", False):
                     if getattr(voice_plan, "unresolved_speakers", None):
                         voice_binding_ready = False
                         speaker_binding_lines.append(
-                            "- Speaker binding: chÆ°a Ä‘á»§, cÃ²n speaker chÆ°a gÃ¡n preset "
+                            "- Speaker binding: chưa đủ, còn speaker chưa gán preset "
                             + f"({', '.join(voice_plan.unresolved_speakers)})"
                         )
                     elif getattr(voice_plan, "missing_preset_ids", None):
                         voice_binding_ready = False
                         speaker_binding_lines.append(
-                            "- Speaker binding: cÃ³ binding trá» tá»›i preset khÃ´ng cÃ²n tá»“n táº¡i "
+                            "- Speaker binding: có binding trỏ tới preset không còn tồn tại "
                             + f"({', '.join(voice_plan.missing_preset_ids)})"
                         )
                     else:
                         speaker_binding_lines.append(
-                            f"- Speaker binding: Ä‘Ã£ gÃ¡n theo speaker cho {len(voice_plan.segment_voice_preset_ids)} dÃ²ng"
+                            f"- Speaker binding: đã gán theo speaker cho {len(voice_plan.segment_voice_preset_ids)} dòng"
                         )
                 else:
-                    speaker_binding_lines.append("- Speaker binding: chÆ°a báº­t, toÃ n bá»™ sáº½ dÃ¹ng preset máº·c Ä‘á»‹nh")
+                    speaker_binding_lines.append(
+                        "- Speaker binding: chưa bật, toàn bộ sẽ dùng preset mặc định"
+                    )
         if database and subtitle_rows and voice_plan is not None:
             if getattr(voice_plan, "active_voice_policies", False):
                 relationship_hits = int(getattr(voice_plan, "relationship_policy_hits", 0))
                 character_hits = int(getattr(voice_plan, "character_policy_hits", 0))
-                if relationship_hits or character_hits:
+                relationship_style_hits = int(getattr(voice_plan, "relationship_style_hits", 0))
+                character_style_hits = int(getattr(voice_plan, "character_style_hits", 0))
+                if relationship_hits or character_hits or relationship_style_hits or character_style_hits:
                     speaker_binding_lines.append(
                         f"- Voice policy: relationship={relationship_hits} dòng, character={character_hits} dòng"
                     )
+                    if relationship_style_hits or character_style_hits:
+                        speaker_binding_lines.append(
+                            f"- Voice style: relationship={relationship_style_hits} dòng, character={character_style_hits} dòng"
+                        )
                 else:
                     speaker_binding_lines.append(
                         "- Voice policy: đã bật nhưng chưa khớp dòng nào; runtime sẽ rơi về speaker binding hoặc preset mặc định"
@@ -5785,7 +6158,7 @@ class MainWindow(QMainWindow):
                 preset=resolved_preset,
                 total_duration_ms=total_duration_ms,
                 require_localized=require_localized,
-                segment_voice_preset_ids=segment_voice_preset_ids,
+                segment_voice_presets=segment_voice_presets,
             )
             voice_track_ready = bool(
                 expected_voice_track_path
@@ -5797,70 +6170,70 @@ class MainWindow(QMainWindow):
             if not voice_binding_ready:
                 voice_track_ready = False
         voice_lines = [
-            "Lồng tiếng:",
-            f"- Số preset giọng: {len(self._voice_presets)}",
-            f"- Track phụ đề đang dùng: {self._subtitle_track_label(active_track)}",
-            f"- Nội dung sẵn sàng để lồng tiếng: {tts_text_ready_count}/{len(subtitle_rows)}",
-            f"- Dòng đã có audio TTS: {tts_ready_count}/{len(subtitle_rows)}",
-            f"- Preset đang chọn: {current_preset.name if current_preset else '-'}",
+            "Lá»“ng tiáº¿ng:",
+            f"- Sá»‘ preset giá»ng: {len(self._voice_presets)}",
+            f"- Track phá»¥ Ä‘á» Ä‘ang dÃ¹ng: {self._subtitle_track_label(active_track)}",
+            f"- Ná»™i dung sáºµn sÃ ng Ä‘á»ƒ lá»“ng tiáº¿ng: {tts_text_ready_count}/{len(subtitle_rows)}",
+            f"- DÃ²ng Ä‘Ã£ cÃ³ audio TTS: {tts_ready_count}/{len(subtitle_rows)}",
+            f"- Preset Ä‘ang chá»n: {current_preset.name if current_preset else '-'}",
         ]
         if self._installed_sapi_voices:
-            voice_lines.append(f"- Giọng SAPI phát hiện: {len(self._installed_sapi_voices)}")
+            voice_lines.append(f"- Giá»ng SAPI phÃ¡t hiá»‡n: {len(self._installed_sapi_voices)}")
         version_suffix = f" v{self._vieneu_environment.package_version}" if self._vieneu_environment.package_version else ""
         if self._vieneu_environment.package_installed:
-            voice_lines.append(f"- VieNeu SDK{version_suffix}: đã cài")
+            voice_lines.append(f"- VieNeu SDK{version_suffix}: Ä‘Ã£ cÃ i")
             if self._vieneu_environment.espeak_path:
                 voice_lines.append(f"- eSpeak NG: {self._vieneu_environment.espeak_path}")
             else:
-                voice_lines.append("- eSpeak NG: chưa tìm thấy cho VieNeu local")
+                voice_lines.append("- eSpeak NG: chÆ°a tÃ¬m tháº¥y cho VieNeu local")
         else:
-            voice_lines.append("- VieNeu SDK: chưa cài")
+            voice_lines.append("- VieNeu SDK: chÆ°a cÃ i")
         voice_lines.extend(speaker_binding_lines)
         if not voice_binding_ready:
-            voice_lines.append("- Trạng thái binding: chưa an toàn để chạy TTS hoặc xuất video")
+            voice_lines.append("- Tráº¡ng thÃ¡i binding: chÆ°a an toÃ n Ä‘á»ƒ cháº¡y TTS hoáº·c xuáº¥t video")
         if current_preset and current_preset.engine.lower() == "vieneu":
             try:
-                voice_lines.append(f"- Chế độ VieNeu: {get_vieneu_mode(current_preset)}")
+                voice_lines.append(f"- Cháº¿ Ä‘á»™ VieNeu: {get_vieneu_mode(current_preset)}")
             except ValueError as exc:
-                voice_lines.append(f"- Cấu hình VieNeu lỗi: {exc}")
+                voice_lines.append(f"- Cáº¥u hÃ¬nh VieNeu lá»—i: {exc}")
             ref_audio_path = str(current_preset.engine_options.get("ref_audio_path", "")).strip()
             ref_text = str(current_preset.engine_options.get("ref_text", "")).strip()
             if ref_audio_path:
-                voice_lines.append(f"- Audio mẫu clone: {ref_audio_path}")
+                voice_lines.append(f"- Audio máº«u clone: {ref_audio_path}")
             if ref_text:
                 preview = ref_text if len(ref_text) <= 72 else ref_text[:69] + "..."
-                voice_lines.append(f"- Văn bản mẫu clone: {preview}")
+                voice_lines.append(f"- VÄƒn báº£n máº«u clone: {preview}")
         if self._last_tts_manifest:
             voice_lines.append(f"- Manifest TTS: {self._last_tts_manifest}")
         if self._last_voice_track_output:
-            voice_lines.append(f"- Track giọng: {self._last_voice_track_output}")
+            voice_lines.append(f"- Track giá»ng: {self._last_voice_track_output}")
         voice_lines.append(
-            "- Đồng bộ track giọng: "
+            "- Äá»“ng bá»™ track giá»ng: "
             + (
-                "Có"
+                "CÃ³"
                 if voice_track_ready
-                else "Cần tạo lại"
+                else "Cáº§n táº¡o láº¡i"
                 if self._last_voice_track_output
-                else "Chưa có"
+                else "ChÆ°a cÃ³"
             )
         )
         self._voice_summary.setText("\n".join(voice_lines))
 
-        mix_lines = ["Trộn âm thanh:"]
+        mix_lines = ["Trá»™n Ã¢m thanh:"]
         if self._audio_artifacts:
-            mix_lines.append(f"- Audio gốc 48 kHz: {self._audio_artifacts.audio_48k_path}")
+            mix_lines.append(f"- Audio gá»‘c 48 kHz: {self._audio_artifacts.audio_48k_path}")
         else:
-            mix_lines.append("- Audio gốc 48 kHz: chưa có")
+            mix_lines.append("- Audio gá»‘c 48 kHz: chÆ°a cÃ³")
         mix_lines.append(f"- BGM: {self._resolve_bgm_path() or '-'}")
         mix_lines.append(
-            f"- Âm lượng: gốc={self._original_volume_input.text()} "
-            f"giọng={self._voice_volume_input.text()} bgm={self._bgm_volume_input.text()}"
+            f"- Ã‚m lÆ°á»£ng: gá»‘c={self._original_volume_input.text()} "
+            f"giá»ng={self._voice_volume_input.text()} bgm={self._bgm_volume_input.text()}"
         )
         mixed_audio_ready = False
         if voice_track_ready and self._last_voice_track_output and self._audio_artifacts:
             mixdown_inputs = self._current_mixdown_inputs()
             if mixdown_inputs is None:
-                mix_lines.append("- Trạng thái: thông số mix chưa hợp lệ")
+                mix_lines.append("- Tráº¡ng thÃ¡i: thÃ´ng sá»‘ mix chÆ°a há»£p lá»‡")
             else:
                 original_volume, voice_volume, bgm_path, bgm_volume = mixdown_inputs
                 expected_mixed_audio_path = self._expected_mixed_audio_path(
@@ -5878,26 +6251,26 @@ class MainWindow(QMainWindow):
                     and expected_mixed_audio_path.resolve() == self._last_mixed_audio_output.resolve()
                 )
                 mix_lines.append(
-                    f"- Trạng thái: {'Đồng bộ với track giọng hiện tại' if mixed_audio_ready else 'Cần trộn lại'}"
+                    f"- Tráº¡ng thÃ¡i: {'Äá»“ng bá»™ vá»›i track giá»ng hiá»‡n táº¡i' if mixed_audio_ready else 'Cáº§n trá»™n láº¡i'}"
                 )
         elif self._last_voice_track_output and self._last_voice_track_output.exists():
             if self._audio_artifacts:
-                mix_lines.append("- Trạng thái: track giọng hiện tại đã cũ, hãy tạo lại trước khi trộn")
+                mix_lines.append("- Tráº¡ng thÃ¡i: track giá»ng hiá»‡n táº¡i Ä‘Ã£ cÅ©, hÃ£y táº¡o láº¡i trÆ°á»›c khi trá»™n")
             else:
-                mix_lines.append("- Trạng thái: thiếu audio 48 kHz để trộn")
+                mix_lines.append("- Tráº¡ng thÃ¡i: thiáº¿u audio 48 kHz Ä‘á»ƒ trá»™n")
         if self._last_mixed_audio_output:
-            mix_lines.append(f"- Âm thanh đã trộn: {self._last_mixed_audio_output}")
+            mix_lines.append(f"- Ã‚m thanh Ä‘Ã£ trá»™n: {self._last_mixed_audio_output}")
         self._mix_summary.setText("\n".join(mix_lines))
 
         subtitle_lines = [
-            "Biên tập phụ đề:",
-            f"- Track đang dùng: {self._subtitle_track_label(active_track)}",
-            f"- Dòng sẵn sàng để xuất: {subtitle_ready_count}/{len(subtitle_rows)}",
-            f"- QC: {qc_report.error_count} lỗi, {qc_report.warning_count} cảnh báo",
-            f"- Có thay đổi chưa lưu: {'Có' if self._subtitle_editor_dirty else 'Không'}",
+            "BiÃªn táº­p phá»¥ Ä‘á»:",
+            f"- Track Ä‘ang dÃ¹ng: {self._subtitle_track_label(active_track)}",
+            f"- DÃ²ng sáºµn sÃ ng Ä‘á»ƒ xuáº¥t: {subtitle_ready_count}/{len(subtitle_rows)}",
+            f"- QC: {qc_report.error_count} lá»—i, {qc_report.warning_count} cáº£nh bÃ¡o",
+            f"- CÃ³ thay Ä‘á»•i chÆ°a lÆ°u: {'CÃ³' if self._subtitle_editor_dirty else 'KhÃ´ng'}",
         ]
         if self._last_subtitle_outputs:
-            subtitle_lines.append("- Tệp đầu ra:")
+            subtitle_lines.append("- Tá»‡p Ä‘áº§u ra:")
             for format_name, output_path in sorted(self._last_subtitle_outputs.items()):
                 subtitle_lines.append(f"- {format_name.upper()}: {output_path}")
         self._subtitle_summary.setText("\n".join(subtitle_lines))
@@ -5905,60 +6278,60 @@ class MainWindow(QMainWindow):
         source_video_path = self._resolve_source_video_path()
         selected_export_preset = self._selected_export_preset(strict=False)
         selected_watermark_profile = self._selected_watermark_profile(strict=False)
-        export_mode = "Ghi cứng ASS" if selected_export_preset and selected_export_preset.burn_subtitles else "Mux soft-sub"
+        export_mode = "Ghi cá»©ng ASS" if selected_export_preset and selected_export_preset.burn_subtitles else "Mux soft-sub"
         watermark_mode = (
-            "Bật" if selected_export_preset and selected_export_preset.watermark_enabled else "Tắt"
+            "Báº­t" if selected_export_preset and selected_export_preset.watermark_enabled else "Táº¯t"
         )
         watermark_profile_label = (
             selected_watermark_profile.name
             if selected_watermark_profile
-            else "Theo preset xuất"
+            else "Theo preset xuáº¥t"
         )
         watermark_path_label = self._resolve_watermark_path() or (
             selected_export_preset.watermark_path if selected_export_preset and selected_export_preset.watermark_path else "-"
         )
         if self._last_export_output:
             self._export_summary.setText(
-                "Video đầu ra:\n"
-                f"- Nguồn: {source_video_path or '-'}\n"
-                f"- Preset xuất: {selected_export_preset.name if selected_export_preset else '-'}\n"
-                f"- Chế độ: {export_mode if selected_export_preset else '-'}\n"
+                "Video Ä‘áº§u ra:\n"
+                f"- Nguá»“n: {source_video_path or '-'}\n"
+                f"- Preset xuáº¥t: {selected_export_preset.name if selected_export_preset else '-'}\n"
+                f"- Cháº¿ Ä‘á»™: {export_mode if selected_export_preset else '-'}\n"
                 f"- Profile watermark: {watermark_profile_label}\n"
                 f"- Watermark: {watermark_mode} / {watermark_path_label}\n"
-                f"- Âm thanh đã trộn: {self._last_mixed_audio_output or '-'}\n"
-                f"- Tệp đầu ra: {self._last_export_output}"
+                f"- Ã‚m thanh Ä‘Ã£ trá»™n: {self._last_mixed_audio_output or '-'}\n"
+                f"- Tá»‡p Ä‘áº§u ra: {self._last_export_output}"
             )
         elif source_video_path:
             self._export_summary.setText(
-                "Sẵn sàng xuất video:\n"
-                f"- Nguồn: {source_video_path}\n"
-                f"- Track phụ đề: {self._subtitle_track_label(active_track)}\n"
-                f"- Số dòng phụ đề: {len(subtitle_rows)}\n"
-                f"- Preset xuất: {selected_export_preset.name if selected_export_preset else '-'}\n"
-                f"- Chế độ: {export_mode if selected_export_preset else '-'}\n"
+                "Sáºµn sÃ ng xuáº¥t video:\n"
+                f"- Nguá»“n: {source_video_path}\n"
+                f"- Track phá»¥ Ä‘á»: {self._subtitle_track_label(active_track)}\n"
+                f"- Sá»‘ dÃ²ng phá»¥ Ä‘á»: {len(subtitle_rows)}\n"
+                f"- Preset xuáº¥t: {selected_export_preset.name if selected_export_preset else '-'}\n"
+                f"- Cháº¿ Ä‘á»™: {export_mode if selected_export_preset else '-'}\n"
                 f"- Profile watermark: {watermark_profile_label}\n"
                 f"- Watermark: {watermark_mode} / {watermark_path_label}\n"
-                f"- Âm thanh đã trộn: {self._last_mixed_audio_output or '-'}\n"
-                f"- Thư mục xuất: {self._current_workspace.exports_dir}"
+                f"- Ã‚m thanh Ä‘Ã£ trá»™n: {self._last_mixed_audio_output or '-'}\n"
+                f"- ThÆ° má»¥c xuáº¥t: {self._current_workspace.exports_dir}"
             )
         else:
-            self._export_summary.setText("Chưa có video nguồn để xuất")
+            self._export_summary.setText("ChÆ°a cÃ³ video nguá»“n Ä‘á»ƒ xuáº¥t")
 
         pipeline_lines = [
-            "Checklist quy trình:",
-            f"- Metadata video: {'Sẵn sàng' if video_row else 'Thiếu'}",
-            f"- Bộ đệm audio 16 kHz/48 kHz: {'Sẵn sàng' if self._audio_artifacts else 'Thiếu'}",
-            f"- Phân đoạn ASR: {segment_count}",
-            f"- Dịch: {translated_count}/{segment_count}",
-            f"- Dòng phụ đề tiếng đích: {subtitle_ready_count}/{len(subtitle_rows)}",
-            f"- QC phụ đề: {'Đạt' if qc_report.error_count == 0 else f'{qc_report.error_count} lỗi'}"
-            + (f", {qc_report.warning_count} cảnh báo" if qc_report.warning_count else ""),
-            f"- Nội dung lồng tiếng tiếng đích: {tts_text_ready_count}/{len(subtitle_rows)}",
+            "Checklist quy trÃ¬nh:",
+            f"- Metadata video: {'Sáºµn sÃ ng' if video_row else 'Thiáº¿u'}",
+            f"- Bá»™ Ä‘á»‡m audio 16 kHz/48 kHz: {'Sáºµn sÃ ng' if self._audio_artifacts else 'Thiáº¿u'}",
+            f"- PhÃ¢n Ä‘oáº¡n ASR: {segment_count}",
+            f"- Dá»‹ch: {translated_count}/{segment_count}",
+            f"- DÃ²ng phá»¥ Ä‘á» tiáº¿ng Ä‘Ã­ch: {subtitle_ready_count}/{len(subtitle_rows)}",
+            f"- QC phá»¥ Ä‘á»: {'Äáº¡t' if qc_report.error_count == 0 else f'{qc_report.error_count} lá»—i'}"
+            + (f", {qc_report.warning_count} cáº£nh bÃ¡o" if qc_report.warning_count else ""),
+            f"- Ná»™i dung lá»“ng tiáº¿ng tiáº¿ng Ä‘Ã­ch: {tts_text_ready_count}/{len(subtitle_rows)}",
             f"- Clip TTS: {tts_ready_count}/{len(subtitle_rows)}",
-            f"- Track giọng: {'Sẵn sàng' if voice_track_ready else 'Thiếu hoặc cần tạo lại'}",
-            f"- Âm thanh đã trộn: {'Sẵn sàng' if mixed_audio_ready else 'Thiếu hoặc cần trộn lại'}",
+            f"- Track giá»ng: {'Sáºµn sÃ ng' if voice_track_ready else 'Thiáº¿u hoáº·c cáº§n táº¡o láº¡i'}",
+            f"- Ã‚m thanh Ä‘Ã£ trá»™n: {'Sáºµn sÃ ng' if mixed_audio_ready else 'Thiáº¿u hoáº·c cáº§n trá»™n láº¡i'}",
             (
-                "- Sẵn sàng xuất: Có"
+                "- Sáºµn sÃ ng xuáº¥t: CÃ³"
                 if video_row
                 and subtitle_rows
                 and subtitle_ready_count == len(subtitle_rows)
@@ -5970,9 +6343,9 @@ class MainWindow(QMainWindow):
                         and mixed_audio_ready
                     )
                 )
-                else "- Sẵn sàng xuất: Không"
+                else "- Sáºµn sÃ ng xuáº¥t: KhÃ´ng"
             ),
-            f"- Video đầu ra: {'Sẵn sàng' if self._last_export_output and self._last_export_output.exists() else 'Chưa có'}",
+            f"- Video Ä‘áº§u ra: {'Sáºµn sÃ ng' if self._last_export_output and self._last_export_output.exists() else 'ChÆ°a cÃ³'}",
         ]
         self._pipeline_summary.setText("\n".join(pipeline_lines))
         if not self._workflow_current_stage:
@@ -5985,3 +6358,4 @@ class MainWindow(QMainWindow):
 
     def _append_log_line(self, message: str) -> None:
         self._logs_console.appendPlainText(message)
+

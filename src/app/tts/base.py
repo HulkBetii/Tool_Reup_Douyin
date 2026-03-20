@@ -27,11 +27,17 @@ def build_tts_stage_hash(
     *,
     allow_source_fallback: bool = True,
     segment_voice_preset_ids: Mapping[str, str] | None = None,
+    segment_voice_presets: Mapping[str, VoicePreset] | None = None,
 ) -> str:
     normalized_segment_voice_preset_ids = {
         str(segment_id): str(preset_id)
         for segment_id, preset_id in (segment_voice_preset_ids or {}).items()
         if str(segment_id).strip() and str(preset_id).strip()
+    }
+    normalized_segment_voice_presets = {
+        str(segment_id): segment_preset.model_dump(mode="json")
+        for segment_id, segment_preset in (segment_voice_presets or {}).items()
+        if str(segment_id).strip()
     }
     return build_stage_hash(
         {
@@ -47,13 +53,19 @@ def build_tts_stage_hash(
                     "tts_text": row["tts_text"],
                     "subtitle_text": row["subtitle_text"],
                     "translated_text": row["translated_text"],
-                    "voice_preset_id": normalized_segment_voice_preset_ids.get(
+                    "voice_preset": normalized_segment_voice_presets.get(
                         str(row["segment_id"]),
-                        preset.voice_preset_id,
+                        {
+                            **preset.model_dump(mode="json"),
+                            "voice_preset_id": normalized_segment_voice_preset_ids.get(
+                                str(row["segment_id"]),
+                                preset.voice_preset_id,
+                            ),
+                        },
                     ),
                 }
                 for row in segments
             ],
-            "version": 2,
+            "version": 3,
         }
     )

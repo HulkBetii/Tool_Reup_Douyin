@@ -21,7 +21,7 @@ from app.project.models import (
     VoicePolicyRecord,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 CANONICAL_SUBTITLE_TRACK_KIND = "canonical"
 USER_SUBTITLE_TRACK_KIND = "user"
 
@@ -281,6 +281,9 @@ CREATE TABLE IF NOT EXISTS voice_policies (
     speaker_character_id TEXT NOT NULL,
     listener_character_id TEXT NOT NULL DEFAULT '',
     voice_preset_id TEXT NOT NULL,
+    speed_override REAL,
+    volume_override REAL,
+    pitch_override REAL,
     notes TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -336,6 +339,7 @@ class ProjectDatabase:
         with self.connect() as connection:
             connection.executescript(SCHEMA_SQL)
             self._ensure_project_columns(connection)
+            self._ensure_voice_policy_columns(connection)
             schema_version = self._read_schema_version(connection)
             if schema_version < SCHEMA_VERSION:
                 self._backfill_subtitle_tracks(connection)
@@ -373,6 +377,18 @@ class ProjectDatabase:
             return int(row["value"])
         except (TypeError, ValueError):
             return 0
+
+    def _ensure_voice_policy_columns(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(voice_policies)").fetchall()
+        }
+        if "speed_override" not in columns:
+            connection.execute("ALTER TABLE voice_policies ADD COLUMN speed_override REAL")
+        if "volume_override" not in columns:
+            connection.execute("ALTER TABLE voice_policies ADD COLUMN volume_override REAL")
+        if "pitch_override" not in columns:
+            connection.execute("ALTER TABLE voice_policies ADD COLUMN pitch_override REAL")
 
     def _write_schema_version(self, connection: sqlite3.Connection, version: int) -> None:
         connection.execute(
@@ -621,9 +637,10 @@ class ProjectDatabase:
                     """
                     INSERT INTO voice_policies(
                         policy_id, project_id, policy_scope, speaker_character_id,
-                        listener_character_id, voice_preset_id, notes, created_at, updated_at
+                        listener_character_id, voice_preset_id, speed_override,
+                        volume_override, pitch_override, notes, created_at, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -633,6 +650,9 @@ class ProjectDatabase:
                             policy.speaker_character_id,
                             policy.listener_character_id or "",
                             policy.voice_preset_id,
+                            policy.speed_override,
+                            policy.volume_override,
+                            policy.pitch_override,
                             policy.notes,
                             policy.created_at,
                             policy.updated_at,

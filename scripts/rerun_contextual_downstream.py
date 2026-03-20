@@ -17,7 +17,7 @@ from app.subtitle.export import export_subtitles
 from app.subtitle.hardsub import export_hardsub_video
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import synthesize_segments
-from app.tts.speaker_binding import build_speaker_binding_plan
+from app.tts.speaker_binding import build_speaker_binding_plan, resolve_segment_voice_presets
 from app.tts.presets import list_voice_presets
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -74,10 +74,11 @@ def _resolve_segment_voice_plan(
         if plan.missing_preset_ids:
             lines.append(f"- Preset khong con ton tai: {', '.join(plan.missing_preset_ids)}")
         raise RuntimeError("\n".join(lines))
-    segment_voice_presets = {
-        segment_id: available_presets[preset_id]
-        for segment_id, preset_id in plan.segment_voice_preset_ids.items()
-    }
+    segment_voice_presets = resolve_segment_voice_presets(
+        plan=plan,
+        default_preset=default_preset,
+        available_presets=available_presets,
+    )
     return segment_voice_presets or None, plan.segment_speaker_keys or None, plan
 
 
@@ -210,6 +211,8 @@ def main() -> int:
         "speaker_bound_segment_count": len(getattr(voice_plan, "segment_voice_preset_ids", {})),
         "character_policy_hits": int(getattr(voice_plan, "character_policy_hits", 0)),
         "relationship_policy_hits": int(getattr(voice_plan, "relationship_policy_hits", 0)),
+        "character_style_hits": int(getattr(voice_plan, "character_style_hits", 0)),
+        "relationship_style_hits": int(getattr(voice_plan, "relationship_style_hits", 0)),
         "tts_manifest": str(synthesized.manifest_path),
         "voice_track_path": str(voice_track.voice_track_path),
         "mixed_audio_path": str(mixed_audio.mixed_audio_path),

@@ -5,6 +5,8 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field
 
+from .models import VoicePreset
+
 _UNKNOWN_SPEAKER_RE = re.compile(r"^unknown(?:[\s_-]*speaker)?(?:[\s_-]*\d+)?$", re.IGNORECASE)
 
 
@@ -77,16 +79,35 @@ class RelationshipVoicePolicyCandidate:
 
 
 @dataclass(slots=True)
+class VoicePolicyValue:
+    voice_preset_id: str = ""
+    speed_override: float | None = None
+    volume_override: float | None = None
+    pitch_override: float | None = None
+
+    def has_style_override(self) -> bool:
+        return (
+            self.speed_override is not None
+            or self.volume_override is not None
+            or self.pitch_override is not None
+        )
+
+
+@dataclass(slots=True)
 class SpeakerBindingPlan:
     active_bindings: bool
     active_voice_policies: bool = False
     segment_voice_preset_ids: dict[str, str] = field(default_factory=dict)
+    segment_voice_style_overrides: dict[str, dict[str, float]] = field(default_factory=dict)
     segment_speaker_keys: dict[str, str] = field(default_factory=dict)
     unresolved_speakers: list[str] = field(default_factory=list)
     missing_preset_ids: list[str] = field(default_factory=list)
     character_policy_hits: int = 0
     relationship_policy_hits: int = 0
+    character_style_hits: int = 0
+    relationship_style_hits: int = 0
     segment_voice_sources: dict[str, str] = field(default_factory=dict)
+    segment_voice_style_sources: dict[str, str] = field(default_factory=dict)
 
 
 def discover_speaker_candidates(
@@ -159,21 +180,68 @@ def discover_relationship_voice_policy_candidates(
 
 def _voice_policy_maps(
     voice_policy_rows: list[object] | None,
-) -> tuple[dict[str, str], dict[tuple[str, str], str]]:
-    character_policy_map: dict[str, str] = {}
-    relationship_policy_map: dict[tuple[str, str], str] = {}
+) -> tuple[dict[str, VoicePolicyValue], dict[tuple[str, str], VoicePolicyValue]]:
+    character_policy_map: dict[str, VoicePolicyValue] = {}
+    relationship_policy_map: dict[tuple[str, str], VoicePolicyValue] = {}
     for row in voice_policy_rows or []:
         policy_scope = str(_row_value(row, "policy_scope", "character") or "character").strip() or "character"
         speaker_key = _normalize_speaker_key(_row_value(row, "speaker_character_id"))
         listener_key = _normalize_speaker_key(_row_value(row, "listener_character_id"))
         voice_preset_id = str(_row_value(row, "voice_preset_id", "") or "").strip()
-        if not speaker_key or not voice_preset_id:
+        if not speaker_key:
+            continue
+        policy_value = VoicePolicyValue(
+            voice_preset_id=voice_preset_id,
+            speed_override=_normalize_optional_float(_row_value(row, "speed_override")),
+            volume_override=_normalize_optional_float(_row_value(row, "volume_override")),
+            pitch_override=_normalize_optional_float(_row_value(row, "pitch_override")),
+        )
+        if not policy_value.voice_preset_id and not policy_value.has_style_override():
             continue
         if policy_scope == "relationship" and listener_key:
-            relationship_policy_map[(speaker_key, listener_key)] = voice_preset_id
+            relationship_policy_map[(speaker_key, listener_key)] = policy_value
             continue
-        character_policy_map[speaker_key] = voice_preset_id
+        character_policy_map[speaker_key] = policy_value
     return character_policy_map, relationship_policy_map
+
+
+def _normalize_optional_float(value: object | None) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _merge_style_overrides(
+    *,
+    character_policy: VoicePolicyValue | None,
+    relationship_policy: VoicePolicyValue | None,
+) -> tuple[dict[str, float], str | None]:
+    override: dict[str, float] = {}
+    source: str | None = None
+    if character_policy is not None:
+        if character_policy.speed_override is not None:
+            override["speed"] = character_policy.speed_override
+            source = "character_policy"
+        if character_policy.volume_override is not None:
+            override["volume"] = character_policy.volume_override
+            source = "character_policy"
+        if character_policy.pitch_override is not None:
+            override["pitch"] = character_policy.pitch_override
+            source = "character_policy"
+    if relationship_policy is not None:
+        if relationship_policy.speed_override is not None:
+            override["speed"] = relationship_policy.speed_override
+            source = "relationship_policy"
+        if relationship_policy.volume_override is not None:
+            override["volume"] = relationship_policy.volume_override
+            source = "relationship_policy"
+        if relationship_policy.pitch_override is not None:
+            override["pitch"] = relationship_policy.pitch_override
+            source = "relationship_policy"
+    return override, source
 
 
 def build_speaker_binding_plan(
@@ -220,6 +288,9 @@ def build_speaker_binding_plan(
         if not speaker_key:
             continue
         plan.segment_speaker_keys[segment_id] = speaker_key
+        character_policy = character_policy_map.get(speaker_key)
+        listener_key = _primary_listener_key(analysis_row)
+        relationship_policy = relationship_policy_map.get((speaker_key, listener_key)) if listener_key else None
 
         bound_preset_id = binding_map.get(("character", speaker_key))
         if bound_preset_id:
@@ -228,32 +299,64 @@ def build_speaker_binding_plan(
                 continue
             plan.segment_voice_preset_ids[segment_id] = bound_preset_id
             plan.segment_voice_sources[segment_id] = "speaker_binding"
-            continue
+        else:
+            relationship_preset_id = relationship_policy.voice_preset_id if relationship_policy else ""
+            if relationship_preset_id:
+                if relationship_preset_id not in available_preset_ids:
+                    missing_preset_ids.add(relationship_preset_id)
+                    continue
+                plan.segment_voice_preset_ids[segment_id] = relationship_preset_id
+                plan.segment_voice_sources[segment_id] = "relationship_policy"
+                plan.relationship_policy_hits += 1
+            else:
+                character_preset_id = character_policy.voice_preset_id if character_policy else ""
+                if character_preset_id:
+                    if character_preset_id not in available_preset_ids:
+                        missing_preset_ids.add(character_preset_id)
+                        continue
+                    plan.segment_voice_preset_ids[segment_id] = character_preset_id
+                    plan.segment_voice_sources[segment_id] = "character_policy"
+                    plan.character_policy_hits += 1
+                elif plan.active_bindings:
+                    unresolved_speakers.add(speaker_key)
 
-        listener_key = _primary_listener_key(analysis_row)
-        relationship_preset_id = relationship_policy_map.get((speaker_key, listener_key)) if listener_key else None
-        if relationship_preset_id:
-            if relationship_preset_id not in available_preset_ids:
-                missing_preset_ids.add(relationship_preset_id)
-                continue
-            plan.segment_voice_preset_ids[segment_id] = relationship_preset_id
-            plan.segment_voice_sources[segment_id] = "relationship_policy"
-            plan.relationship_policy_hits += 1
-            continue
-
-        character_preset_id = character_policy_map.get(speaker_key)
-        if character_preset_id:
-            if character_preset_id not in available_preset_ids:
-                missing_preset_ids.add(character_preset_id)
-                continue
-            plan.segment_voice_preset_ids[segment_id] = character_preset_id
-            plan.segment_voice_sources[segment_id] = "character_policy"
-            plan.character_policy_hits += 1
-            continue
-
-        if plan.active_bindings:
-            unresolved_speakers.add(speaker_key)
+        style_overrides, style_source = _merge_style_overrides(
+            character_policy=character_policy,
+            relationship_policy=relationship_policy,
+        )
+        if style_overrides:
+            plan.segment_voice_style_overrides[segment_id] = style_overrides
+            if style_source:
+                plan.segment_voice_style_sources[segment_id] = style_source
+            if style_source == "relationship_policy":
+                plan.relationship_style_hits += 1
+            elif style_source == "character_policy":
+                plan.character_style_hits += 1
 
     plan.unresolved_speakers = sorted(unresolved_speakers)
     plan.missing_preset_ids = sorted(missing_preset_ids)
     return plan
+
+
+def resolve_segment_voice_presets(
+    *,
+    plan: SpeakerBindingPlan,
+    default_preset: VoicePreset,
+    available_presets: dict[str, VoicePreset],
+) -> dict[str, VoicePreset]:
+    segment_voice_presets: dict[str, VoicePreset] = {}
+    affected_segment_ids = set(plan.segment_voice_preset_ids) | set(plan.segment_voice_style_overrides)
+    for segment_id in affected_segment_ids:
+        base_preset_id = plan.segment_voice_preset_ids.get(segment_id, default_preset.voice_preset_id)
+        base_preset = available_presets.get(base_preset_id, default_preset)
+        style_override = plan.segment_voice_style_overrides.get(segment_id, {})
+        if not style_override:
+            segment_voice_presets[segment_id] = base_preset
+            continue
+        update_payload = {
+            key: style_override[key]
+            for key in ("speed", "volume", "pitch")
+            if key in style_override
+        }
+        segment_voice_presets[segment_id] = base_preset.model_copy(update=update_payload)
+    return segment_voice_presets

@@ -38,6 +38,7 @@ def synthesize_segments(
         preset,
         allow_source_fallback=allow_source_fallback,
         segment_voice_preset_ids=voice_preset_assignments,
+        segment_voice_presets=segment_voice_presets,
     )
     cache_dir = workspace.cache_dir / "tts" / stage_hash
     raw_dir = cache_dir / "raw"
@@ -74,6 +75,9 @@ def synthesize_segments(
                 voice_id=active_preset.voice_id,
                 voice_preset_id=active_preset.voice_preset_id,
                 speaker_key=(segment_speaker_keys or {}).get(segment_id),
+                voice_speed=active_preset.speed,
+                voice_volume=active_preset.volume,
+                voice_pitch=active_preset.pitch,
             )
         else:
             context.cancellation_token.raise_if_canceled()
@@ -90,6 +94,9 @@ def synthesize_segments(
                 voice_id=result.voice_id,
                 voice_preset_id=active_preset.voice_preset_id,
                 speaker_key=(segment_speaker_keys or {}).get(segment_id),
+                voice_speed=active_preset.speed,
+                voice_volume=active_preset.volume,
+                voice_pitch=active_preset.pitch,
             )
         artifacts.append(artifact)
         context.report_progress(min(85, int(index * 85 / total)), f"TTS {index}/{total}")
@@ -110,6 +117,9 @@ def synthesize_segments(
                 "voice_id": item.voice_id,
                 "voice_preset_id": item.voice_preset_id,
                 "speaker_key": item.speaker_key,
+                "voice_speed": item.voice_speed,
+                "voice_volume": item.voice_volume,
+                "voice_pitch": item.voice_pitch,
             }
             for item in artifacts
         ],
@@ -142,6 +152,9 @@ def load_synthesized_segments(workspace: ProjectWorkspace, stage_hash: str) -> S
             voice_id=item.get("voice_id"),
             voice_preset_id=item.get("voice_preset_id"),
             speaker_key=item.get("speaker_key"),
+            voice_speed=item.get("voice_speed"),
+            voice_volume=item.get("voice_volume"),
+            voice_pitch=item.get("voice_pitch"),
         )
         for item in payload.get("artifacts", [])
     ]
