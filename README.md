@@ -38,6 +38,8 @@ Slice da duoc khoi tao trong repo nay:
 - VieNeu engine optional cho Vietnamese local/remote TTS
 - VieNeu voice cloning preset editor (ref audio + ref text) trong UI
 - Batch voice profile management: sua field preset, save-as-new, xoa, va import hang loat clone refs tu `assets/voices`
+- Contextual Translation V2 cho `zh -> vi`: scene planner -> semantic pass -> dialogue adaptation -> semantic QC -> review gate
+- Regression-first workflow: fixture manifest, semantic/golden fixtures, review reason codes, va docs cho bugfix durable
 - Build voice track aligned timeline tu TTS clips
 - Mixdown MVP: voice + original + BGM optional
 - Video export tu dong dung mixed audio neu co
@@ -50,6 +52,7 @@ Slice da duoc khoi tao trong repo nay:
 - Preview mpv auto-reload subtitle theo debounce khi dang sua Sub Editor
 - Khoi phuc lai TTS manifest / voice track / mixed audio / subtitle outputs / export output khi mo lai project
 - Workflow nhanh de chain `Prepare media`, `ASR -> Dich`, `Long tieng nhanh`, `Full pipeline`
+- Manual speaker -> voice preset binding theo project, co fail-safe gate truoc TTS/export va fallback an toan cho placeholder speaker `unknown_*`
 - PyInstaller spec + PowerShell build scripts + Inno Setup script cho ban Windows may sach
 
 ## Cau truc
@@ -60,8 +63,12 @@ src/app/
   project/      # bootstrap project folder + SQLite schema
   media/        # ffprobe + extract audio cache
   asr/          # ASR abstraction + faster-whisper + persistence
+  translate/    # prompt presets, contextual V2 runtime, semantic QC
+  subtitle/     # subtitle editor helpers, QC, preview, export
+  tts/          # TTS engines, voice presets, speaker binding
+  audio/        # voice track + mixdown
   ui/           # main window, tabs, status panel
-tests/          # unit tests cho foundation slice
+tests/          # unit + integration + regression fixtures
 docs/           # roadmap / notes
 build/          # pyinstaller.spec va metadata build
 scripts/        # build bundle / installer
@@ -117,25 +124,23 @@ Ghi chu packaging:
 
 ## Trang thai
 
-Repo hien moi dung den cac task nen tang dau roadmap:
+Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may local:
 
-- `FND-01` den `FND-04`
-- `CORE-01`, `CORE-02`
-- `UI-01`, `UI-02`
-- `JOB-01`
-- `MEDIA-01`
-- `MEDIA-02`, `MEDIA-03`
-- `ASR-01`, `ASR-02`, `ASR-03`
-- translation stage + subtitle export MVP
-- subtitle editor MVP + hard-sub export
-- subtitle QC + shift/find-replace + mpv preview guardrails
-- split/merge practical tools trong Sub Editor
-- TTS local + voice track + mixdown MVP
-- export presets + watermark overlay
-- subtitle track layer tach khoi canonical segments
-- encrypted settings + active preset persistence + soft-sub mux export
-- mpv subtitle reload/debounce cho vong edit-preview nhanh hon
-- packaging cho Windows may sach bang PyInstaller + Inno Setup
+- media ingest + ASR + persist canonical `segments`
+- Contextual Translation V2 cho `zh -> vi`
+- semantic QC + review queue + fail-safe gate truoc TTS/export
+- subtitle track layer tach khoi canonical `segments`
+- subtitle editor practical tools + mpv preview auto-reload
+- TTS local/VieNeu + voice track + mixdown + hard-sub/soft-sub export
+- preset persistence cho voice/export/watermark
+- manual speaker -> voice preset binding theo project
+- regression harness cho semantic bugs:
+  - fixture manifest
+  - regression/golden fixtures
+  - error taxonomy
+  - review reason codes
+  - AI bugfix workflow docs
+- packaging/CI co ban cho may Windows local
 
 De preview mpv tren Windows, co the cau hinh `mpv_dll_path` trong tab `Cai dat` hoac dong kem `dependencies\mpv\mpv-2.dll` trong bundle.
 Khi dang mo `Preview tu dau` hoac `Preview dong chon`, editor se tu dong export `live_preview.ass` theo debounce va reload vao mpv, nen sua subtitle se thay doi nhanh hon ma khong can mo lai preview moi lan.
@@ -148,4 +153,9 @@ Khi sua subtitle trong editor, lan luu dau tien tren canonical track se fork san
 Khi mo lai project, app se tu restore cac artifact da tao truoc do tu lich su job runs, nen neu da co `voice track`, `mixed audio`, `SRT/ASS`, hoac `export video`, ban co the di tiep thay vi render lai tu dau.
 Tab `Du an` hien co `Pipeline checklist` de bao dang thieu buoc nao, va `Workflow nhanh` de chain mot so cum buoc pho bien den tan export video.
 
-Next slice hop ly theo tai lieu: batch voice profile management, reusable export/watermark preset library, va shipping installer smoke test tren may sach.
+Huong tiep theo hop ly:
+
+- mo rong golden semantic dataset tu cac bug that da gap
+- them regression test truc tiep cho cac helper/script downstream quan trong
+- nang cap voice policy theo nhan vat/quan he
+- polish bulk actions trong review UI

@@ -83,6 +83,28 @@
       "kind": "ui_review",
       "path": "tests/fixtures/regression/ui-review-lock-preserves-allowed-alternates.json",
       "notes": "UI review lock khong duoc xoa allowed_alternates va metadata cua relationship da co."
+    },
+    {
+      "fixture_id": "zh-vi-speaker-binding-partial-config-blocks-tts",
+      "class": "speaker_binding_partial_config_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-speaker-binding-partial-config-blocks-tts.json",
+      "notes": "Neu da bat dau gan speaker -> voice preset thi moi speaker da nhan dien trong track dang dung phai duoc gan day du; neu khong TTS phai block thay vi doan preset."
+    },
+    {
+      "fixture_id": "zh-vi-speaker-binding-unknown-placeholder-falls-back",
+      "class": "speaker_binding_unknown_placeholder_fallback",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-speaker-binding-unknown-placeholder-falls-back.json",
+      "notes": "Placeholder speaker ids nhu unknown_speaker_1 va Unknown Speaker 2 khong duoc bi coi la speaker da nhan dien can manual binding."
     }
   ]
 }

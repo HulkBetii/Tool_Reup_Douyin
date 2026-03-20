@@ -1,0 +1,54 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "segment_index": 0,
+      "start_ms": 0,
+      "end_ms": 1200,
+      "subtitle_text": "Đi thôi.",
+      "tts_text": "Đi thôi em.",
+      "translated_text": "Đi thôi."
+    },
+    {
+      "segment_id": "evt-2",
+      "source_segment_id": "seg-2",
+      "segment_index": 1,
+      "start_ms": 1200,
+      "end_ms": 2400,
+      "subtitle_text": "Biết rồi.",
+      "tts_text": "Biết rồi.",
+      "translated_text": "Biết rồi."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 1.0
+      }
+    },
+    {
+      "segment_id": "seg-2",
+      "speaker_json": {
+        "character_id": "char_b",
+        "confidence": 1.0
+      }
+    }
+  ],
+  "binding_rows": [
+    {
+      "binding_id": "bind:character:char_a",
+      "project_id": "project-1",
+      "speaker_type": "character",
+      "speaker_key": "char_a",
+      "voice_preset_id": "voice-a"
+    }
+  ],
+  "available_preset_ids": [
+    "voice-a",
+    "voice-b",
+    "default-sapi"
+  ]
+}

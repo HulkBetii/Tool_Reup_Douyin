@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from pathlib import Path
 from sqlite3 import Row
 
@@ -25,7 +26,13 @@ def build_tts_stage_hash(
     preset: VoicePreset,
     *,
     allow_source_fallback: bool = True,
+    segment_voice_preset_ids: Mapping[str, str] | None = None,
 ) -> str:
+    normalized_segment_voice_preset_ids = {
+        str(segment_id): str(preset_id)
+        for segment_id, preset_id in (segment_voice_preset_ids or {}).items()
+        if str(segment_id).strip() and str(preset_id).strip()
+    }
     return build_stage_hash(
         {
             "stage": "tts",
@@ -40,9 +47,13 @@ def build_tts_stage_hash(
                     "tts_text": row["tts_text"],
                     "subtitle_text": row["subtitle_text"],
                     "translated_text": row["translated_text"],
+                    "voice_preset_id": normalized_segment_voice_preset_ids.get(
+                        str(row["segment_id"]),
+                        preset.voice_preset_id,
+                    ),
                 }
                 for row in segments
             ],
-            "version": 1,
+            "version": 2,
         }
     )

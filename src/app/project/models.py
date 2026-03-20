@@ -168,6 +168,18 @@ class RelationshipProfileRecord:
 
 
 @dataclass(slots=True)
+class SpeakerBindingRecord:
+    binding_id: str
+    project_id: str
+    speaker_type: str
+    speaker_key: str
+    voice_preset_id: str
+    notes: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(slots=True)
 class SceneMemoryRecord:
     scene_id: str
     project_id: str

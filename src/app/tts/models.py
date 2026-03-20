@@ -39,6 +39,8 @@ class SynthesizedSegmentArtifact:
     duration_ms: int
     sample_rate: int
     voice_id: str | None = None
+    voice_preset_id: str | None = None
+    speaker_key: str | None = None
     fitted_wav_path: Path | None = None
     fitted_duration_ms: int | None = None
 

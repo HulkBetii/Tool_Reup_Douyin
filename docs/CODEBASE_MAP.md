@@ -65,10 +65,11 @@ This is a practical working map for regression-first debugging.
     - [src/app/subtitle/hardsub.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\subtitle\hardsub.py)
 
 - tts / audio
-  - TTS engines, voice presets, stage hashing, voice track building, mixdown
+  - TTS engines, voice presets, speaker binding, stage hashing, voice track building, mixdown
   - key files:
     - [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py)
     - [src/app/tts/presets.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\presets.py)
+    - [src/app/tts/speaker_binding.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\speaker_binding.py)
     - [src/app/tts/vieneu_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\vieneu_engine.py)
     - [src/app/audio/voiceover_track.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\voiceover_track.py)
     - [src/app/audio/mixdown.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\mixdown.py)
@@ -93,6 +94,7 @@ Canonical project state is centered in [src/app/project/database.py](C:\Users\Hu
 - `relationship_profiles`
 - `scene_memories`
 - `segment_analyses`
+- `speaker_bindings`
 
 Important distinction:
 
@@ -112,9 +114,10 @@ Important distinction:
 6. contextual outputs are applied back into canonical `segments`
 7. canonical outputs sync into canonical subtitle track
 8. user edits live in user subtitle tracks
-9. TTS uses subtitle rows / `tts_text`
-10. voice track + mixdown produce audio artifacts
-11. export uses active subtitle track + optional mixed audio
+9. speaker binding (neu co) resolve `speaker -> voice preset`
+10. TTS uses subtitle rows / `tts_text`
+11. voice track + mixdown produce audio artifacts
+12. export uses active subtitle track + optional mixed audio
 
 ## Best hook points for durable bugfixes
 
@@ -159,18 +162,25 @@ Important distinction:
 - planning/runtime use:
   - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py)
 
-### Future speaker -> voice preset binding
+### Speaker -> voice preset binding
 
-No dedicated binding layer exists yet.
+- persistence:
+  - [src/app/project/database.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\database.py)
+  - `speaker_bindings` table
+- planning / normalization:
+  - [src/app/tts/speaker_binding.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\speaker_binding.py)
+- UI:
+  - [src/app/ui/main_window.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ui\main_window.py)
+- downstream script/runtime:
+  - [scripts/rerun_contextual_downstream.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\rerun_contextual_downstream.py)
 
-Natural future hook:
-- store binding next to `character_profiles` / `segment_analyses`
-- enforce it in TTS preset selection before [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py)
+Current contract:
+- no saved bindings => global preset behavior
+- active bindings + unresolved recognized speaker => fail-safe block
+- `unknown_*` placeholder speakers => fallback to global preset
 
 ## Current weak spots for regression-oriented development
 
-- no committed fixture manifest before this pass
-- no dedicated bugfix workflow doc before this pass
-- no central taxonomy doc for semantic failure modes before this pass
-- prompt templates are seeded from code and project presets, not from a committed prompt catalog directory
-- semantic QC has tests, but there was no explicit home for future adversarial regression fixtures
+- prompt templates are still seeded from code and project presets, not from a committed prompt catalog directory
+- golden/regression fixture catalog exists, but coverage is still thin compared with the number of real-world semantic edge cases
+- helper scripts used in real reruns need explicit regression tests whenever they gain new gating logic

@@ -326,6 +326,8 @@ def build_voice_track(
                 duration_ms=artifact.duration_ms,
                 sample_rate=artifact.sample_rate,
                 voice_id=artifact.voice_id,
+                voice_preset_id=artifact.voice_preset_id,
+                speaker_key=artifact.speaker_key,
                 fitted_wav_path=fitted_path,
                 fitted_duration_ms=slot_ms,
             )

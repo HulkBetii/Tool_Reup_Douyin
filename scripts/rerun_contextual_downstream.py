@@ -17,6 +17,7 @@ from app.subtitle.export import export_subtitles
 from app.subtitle.hardsub import export_hardsub_video
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import synthesize_segments
+from app.tts.speaker_binding import build_speaker_binding_plan
 from app.tts.presets import list_voice_presets
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -43,6 +44,39 @@ def _resolve_voice_preset(project_root: Path, voice_preset_id: str):
         if preset.voice_preset_id == voice_preset_id:
             return preset
     raise RuntimeError(f"Khong tim thay voice preset: {voice_preset_id}")
+
+
+def _resolve_segment_voice_plan(
+    *,
+    workspace,
+    database: ProjectDatabase,
+    segments: list[object],
+    default_preset,
+):
+    available_presets = {preset.voice_preset_id: preset for preset in list_voice_presets(workspace.root_dir)}
+    available_presets[default_preset.voice_preset_id] = default_preset
+    binding_rows = database.list_speaker_bindings(workspace.project_id)
+    analysis_rows = database.list_segment_analyses(workspace.project_id)
+    plan = build_speaker_binding_plan(
+        subtitle_rows=segments,
+        analysis_rows=analysis_rows,
+        binding_rows=binding_rows,
+        available_preset_ids=set(available_presets),
+    )
+    if not plan.active_bindings:
+        return None, plan.segment_speaker_keys or None, plan
+    if plan.unresolved_speakers or plan.missing_preset_ids:
+        lines = ["Speaker binding hien chua day du, chua the rerun downstream an toan."]
+        if plan.unresolved_speakers:
+            lines.append(f"- Speaker chua gan preset: {', '.join(plan.unresolved_speakers)}")
+        if plan.missing_preset_ids:
+            lines.append(f"- Preset khong con ton tai: {', '.join(plan.missing_preset_ids)}")
+        raise RuntimeError("\n".join(lines))
+    segment_voice_presets = {
+        segment_id: available_presets[preset_id]
+        for segment_id, preset_id in plan.segment_voice_preset_ids.items()
+    }
+    return segment_voice_presets or None, plan.segment_speaker_keys or None, plan
 
 
 def _resolve_original_audio(workspace, database: ProjectDatabase, settings):
@@ -98,6 +132,12 @@ def main() -> int:
     total_duration_ms = max(int(row["end_ms"]) for row in segments) if segments else 0
     if total_duration_ms <= 0:
         raise RuntimeError("Khong co segment hop le de rerun TTS/export")
+    segment_voice_presets, segment_speaker_keys, voice_plan = _resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=segments,
+        default_preset=voice_preset,
+    )
 
     original_audio = _resolve_original_audio(workspace, database, settings)
     source_video_path = workspace.source_video_path
@@ -114,6 +154,8 @@ def main() -> int:
         preset=voice_preset,
         engine=create_tts_engine(voice_preset, project_root=workspace.root_dir),
         allow_source_fallback=False,
+        segment_voice_presets=segment_voice_presets,
+        segment_speaker_keys=segment_speaker_keys,
     )
     voice_track = build_voice_track(
         _context("voice_track"),
@@ -159,6 +201,10 @@ def main() -> int:
         "voice_preset_id": args.voice_preset_id,
         "export_preset_id": args.export_preset_id,
         "pending_review_count": pending_review_count,
+        "speaker_binding_active": bool(getattr(voice_plan, "active_bindings", False)),
+        "speaker_binding_unresolved": list(getattr(voice_plan, "unresolved_speakers", [])),
+        "speaker_binding_missing_preset_ids": list(getattr(voice_plan, "missing_preset_ids", [])),
+        "speaker_bound_segment_count": len(getattr(voice_plan, "segment_voice_preset_ids", {})),
         "tts_manifest": str(synthesized.manifest_path),
         "voice_track_path": str(voice_track.voice_track_path),
         "mixed_audio_path": str(mixed_audio.mixed_audio_path),

@@ -1,0 +1,36 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "segment_index": 0,
+      "start_ms": 0,
+      "end_ms": 1200,
+      "subtitle_text": "Di thoi.",
+      "tts_text": "Di thoi.",
+      "translated_text": "Di thoi."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "unknown_speaker_1",
+        "confidence": 0.41
+      }
+    }
+  ],
+  "binding_rows": [
+    {
+      "binding_id": "bind:character:char_a",
+      "project_id": "project-1",
+      "speaker_type": "character",
+      "speaker_key": "char_a",
+      "voice_preset_id": "voice-a"
+    }
+  ],
+  "available_preset_ids": [
+    "voice-a",
+    "default-sapi"
+  ]
+}

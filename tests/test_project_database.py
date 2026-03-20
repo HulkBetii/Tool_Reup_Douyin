@@ -11,6 +11,7 @@ from app.project.models import (
     SceneMemoryRecord,
     SegmentAnalysisRecord,
     SegmentRecord,
+    SpeakerBindingRecord,
 )
 from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 
@@ -247,6 +248,48 @@ def test_project_database_preserves_allowed_alternates_when_relationship_is_relo
     assert updated_row["relation_type"] == "siblings"
     assert updated_row["notes"] == "existing policy"
     assert json.loads(updated_row["allowed_alternates_json"]) == {"self_terms": ["tao"], "address_terms": ["mày"]}
+
+
+def test_project_database_replaces_and_lists_speaker_bindings(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-20T00:00:00+00:00",
+            updated_at="2026-03-20T00:00:00+00:00",
+        )
+    )
+
+    database.replace_speaker_bindings(
+        "project-1",
+        [
+            SpeakerBindingRecord(
+                binding_id="bind:character:char_a",
+                project_id="project-1",
+                speaker_type="character",
+                speaker_key="char_a",
+                voice_preset_id="voice-a",
+                notes="main narrator",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            )
+        ],
+    )
+
+    rows = database.list_speaker_bindings("project-1")
+
+    assert len(rows) == 1
+    assert rows[0]["speaker_type"] == "character"
+    assert rows[0]["speaker_key"] == "char_a"
+    assert rows[0]["voice_preset_id"] == "voice-a"
+    assert rows[0]["notes"] == "main narrator"
 
 
 def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:

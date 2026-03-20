@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QSignalBlocker, QTimer, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -58,6 +58,7 @@ from app.project.database import (
 from app.project.models import (
     ProjectInitRequest,
     ProjectWorkspace,
+    SpeakerBindingRecord,
     SubtitleTrackRecord,
 )
 from app.project.runtime_state import restore_pipeline_state
@@ -77,6 +78,7 @@ from app.subtitle.qc import SubtitleQcConfig, SubtitleQcIssue, SubtitleQcReport,
 from app.tts.base import build_tts_stage_hash
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import load_synthesized_segments, synthesize_segments
+from app.tts.speaker_binding import build_speaker_binding_plan, discover_speaker_candidates
 from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 from app.tts.presets import (
     batch_import_voice_clone_presets,
@@ -139,6 +141,8 @@ class MainWindow(QMainWindow):
         self._workflow_current_stage: str | None = None
         self._workflow_current_job_id: str | None = None
         self._workflow_name: str | None = None
+        self._speaker_binding_loading = False
+        self._speaker_binding_dirty = False
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1360, 860)
@@ -599,6 +603,10 @@ class MainWindow(QMainWindow):
         self._voice_preset_notes = self._create_info_label("Chưa có ghi chú cho preset")
         self._voice_clone_status = self._create_info_label("Preset clone chưa được cấu hình")
         self._voice_profile_status = self._create_info_label("Quản lý preset giọng đã sẵn sàng")
+        self._speaker_binding_status = self._create_info_label("Speaker binding: chưa có dữ liệu")
+        self._speaker_binding_hint = self._create_info_label(
+            "Mẹo: nếu đã lưu ít nhất 1 speaker binding, mọi speaker nhận diện rõ trong track hiện tại phải được gán preset. Speaker unknown vẫn dùng preset mặc định."
+        )
         self._voice_notes_input = QPlainTextEdit()
         self._voice_notes_input.setPlaceholderText("Ghi chú preset hoặc ghi chú về cấu hình clone")
         self._voice_notes_input.setFixedHeight(56)
@@ -615,6 +623,18 @@ class MainWindow(QMainWindow):
         self._original_volume_input = QLineEdit("0.35")
         self._voice_volume_input = QLineEdit("1.0")
         self._bgm_volume_input = QLineEdit("0.15")
+        self._speaker_binding_table = QTableWidget(0, 4)
+        self._speaker_binding_table.setHorizontalHeaderLabels(["Speaker", "Số dòng", "Preset giọng", "Trạng thái"])
+        self._speaker_binding_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._speaker_binding_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._speaker_binding_table.setAlternatingRowColors(True)
+        self._speaker_binding_table.verticalHeader().setVisible(False)
+        self._speaker_binding_table.setMinimumHeight(180)
+        speaker_binding_header = self._speaker_binding_table.horizontalHeader()
+        speaker_binding_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        speaker_binding_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        speaker_binding_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        speaker_binding_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         reload_voices_button = QPushButton("Nạp lại preset")
         reload_voices_button.clicked.connect(self._reload_voice_presets)
@@ -634,6 +654,14 @@ class MainWindow(QMainWindow):
         self._delete_voice_preset_button.clicked.connect(self._delete_selected_voice_preset)
         self._batch_import_voice_profiles_button = QPushButton("Nhập hàng loạt từ thư mục mẫu")
         self._batch_import_voice_profiles_button.clicked.connect(self._batch_import_voice_profiles)
+        self._reload_speaker_bindings_button = QPushButton("Nạp speaker")
+        self._reload_speaker_bindings_button.clicked.connect(self._reload_speaker_bindings)
+        self._save_speaker_bindings_button = QPushButton("Lưu binding")
+        self._save_speaker_bindings_button.clicked.connect(self._save_speaker_bindings)
+        self._fill_speaker_bindings_button = QPushButton("Gán preset đang chọn cho ô trống")
+        self._fill_speaker_bindings_button.clicked.connect(self._fill_unbound_speakers_with_selected_preset)
+        self._clear_speaker_bindings_button = QPushButton("Xóa gán trên form")
+        self._clear_speaker_bindings_button.clicked.connect(self._clear_speaker_binding_form)
         choose_bgm_button = QPushButton("Chọn BGM")
         choose_bgm_button.clicked.connect(self._choose_bgm_file)
         mix_button = QPushButton("Trộn âm thanh")
@@ -663,6 +691,15 @@ class MainWindow(QMainWindow):
         profile_action_row.addLayout(profile_action_row_bottom)
         profile_action_container = QWidget()
         profile_action_container.setLayout(profile_action_row)
+
+        speaker_binding_actions = QHBoxLayout()
+        speaker_binding_actions.addWidget(self._reload_speaker_bindings_button)
+        speaker_binding_actions.addWidget(self._save_speaker_bindings_button)
+        speaker_binding_actions.addWidget(self._fill_speaker_bindings_button)
+        speaker_binding_actions.addWidget(self._clear_speaker_bindings_button)
+        speaker_binding_actions.addStretch(1)
+        speaker_binding_actions_container = QWidget()
+        speaker_binding_actions_container.setLayout(speaker_binding_actions)
 
         ref_audio_row = QHBoxLayout()
         ref_audio_row.addWidget(self._vieneu_ref_audio_input)
@@ -721,6 +758,10 @@ class MainWindow(QMainWindow):
         form.addRow("Văn bản mẫu VieNeu", self._vieneu_ref_text_input)
         form.addRow("", profile_action_container)
         form.addRow("", action_container)
+        form.addRow("Speaker binding", self._speaker_binding_status)
+        form.addRow("", self._speaker_binding_hint)
+        form.addRow("Bảng gán speaker", self._speaker_binding_table)
+        form.addRow("", speaker_binding_actions_container)
         form.addRow("BGM tùy chọn", bgm_container)
         form.addRow("Mức âm khi trộn", mix_container)
 
@@ -1380,11 +1421,13 @@ class MainWindow(QMainWindow):
         preset: object,
         total_duration_ms: int,
         require_localized: bool,
+        segment_voice_preset_ids: dict[str, str] | None = None,
     ) -> tuple[Path | None, list[int]]:
         tts_stage_hash = build_tts_stage_hash(
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
+            segment_voice_preset_ids=segment_voice_preset_ids,
         )
         cached = load_synthesized_segments(workspace, tts_stage_hash)
         if not cached:
@@ -1787,11 +1830,15 @@ class MainWindow(QMainWindow):
         self._subtitle_qc_report = SubtitleQcReport(total_segments=0, issues=[])
         self._subtitle_qc_summary.setText("QC phụ đề chưa được chạy")
         self._subtitle_qc_table.setRowCount(0)
-        for row_index in range(self._subtitle_table.rowCount()):
-            for column_index in range(self._subtitle_table.columnCount()):
-                item = self._subtitle_table.item(row_index, column_index)
-                if item is not None:
-                    item.setBackground(QColor())
+        blocker = QSignalBlocker(self._subtitle_table)
+        try:
+            for row_index in range(self._subtitle_table.rowCount()):
+                for column_index in range(self._subtitle_table.columnCount()):
+                    item = self._subtitle_table.item(row_index, column_index)
+                    if item is not None:
+                        item.setBackground(QColor())
+        finally:
+            del blocker
 
     def _apply_qc_report_to_ui(self, report: SubtitleQcReport) -> None:
         self._subtitle_qc_report = report
@@ -2131,6 +2178,7 @@ class MainWindow(QMainWindow):
             self._vieneu_environment = detect_vieneu_installation()
             self._voice_info.setText("Runtime giọng đọc: chưa mở dự án")
             self._sync_voice_preset_form()
+            self._reload_speaker_bindings()
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         project_selected_preset_id = database.get_active_voice_preset_id(self._current_workspace.project_id)
@@ -2170,6 +2218,7 @@ class MainWindow(QMainWindow):
             voice_lines.append("eSpeak NG: chưa tìm thấy, VieNeu local sẽ chưa chạy được")
         self._voice_info.setText("\n".join(voice_lines))
         self._sync_voice_preset_form()
+        self._reload_speaker_bindings()
 
     def _reload_export_presets(self) -> None:
         if not self._current_workspace:
@@ -2544,6 +2593,341 @@ class MainWindow(QMainWindow):
         self._voice_profile_status.setText(
             "Trình quản lý preset giọng đã sẵn sàng. Bạn có thể sửa, nhân bản, xóa hoặc nhập hàng loạt."
         )
+
+    def _character_name_map(self, database: ProjectDatabase) -> dict[str, str]:
+        if not self._current_workspace:
+            return {}
+        mapping: dict[str, str] = {}
+        for row in database.list_character_profiles(self._current_workspace.project_id):
+            character_id = str(row["character_id"] or "").strip()
+            if not character_id:
+                continue
+            display_name = str(row["canonical_name_vi"] or row["canonical_name_zh"] or "").strip()
+            if display_name:
+                mapping[character_id] = display_name
+        return mapping
+
+    @staticmethod
+    def _speaker_binding_status_color(status_kind: str) -> QColor:
+        if status_kind == "ok":
+            return QColor(226, 239, 218)
+        if status_kind == "missing":
+            return QColor(255, 229, 229)
+        if status_kind == "unbound":
+            return QColor(255, 244, 214)
+        return QColor()
+
+    def _set_speaker_binding_row_status(self, row_index: int, *, status_text: str, status_kind: str) -> None:
+        status_item = self._speaker_binding_table.item(row_index, 3)
+        if status_item is None:
+            status_item = QTableWidgetItem()
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._speaker_binding_table.setItem(row_index, 3, status_item)
+        status_item.setText(status_text)
+        status_item.setData(Qt.ItemDataRole.UserRole, status_kind)
+        status_item.setBackground(self._speaker_binding_status_color(status_kind))
+
+    def _update_speaker_binding_row_status(self, row_index: int, available_preset_ids: set[str] | None = None) -> None:
+        combo = self._speaker_binding_table.cellWidget(row_index, 2)
+        if not isinstance(combo, QComboBox):
+            return
+        preset_id = str(combo.currentData() or "").strip()
+        preset_ids = available_preset_ids or {preset.voice_preset_id for preset in self._voice_presets}
+        if not preset_id:
+            self._set_speaker_binding_row_status(row_index, status_text="Chưa gán", status_kind="unbound")
+            return
+        if preset_id not in preset_ids:
+            self._set_speaker_binding_row_status(
+                row_index,
+                status_text="Preset đã gán không còn tồn tại",
+                status_kind="missing",
+            )
+            return
+        self._set_speaker_binding_row_status(
+            row_index,
+            status_text="Đã gán preset riêng",
+            status_kind="ok",
+        )
+
+    def _refresh_speaker_binding_status_summary(self) -> None:
+        row_count = self._speaker_binding_table.rowCount()
+        if not self._current_workspace:
+            self._speaker_binding_status.setText("Speaker binding: chưa mở dự án")
+            return
+        if row_count == 0:
+            self._speaker_binding_status.setText("Speaker binding: chưa có speaker từ Contextual V2")
+            return
+
+        bound_count = 0
+        unresolved_count = 0
+        missing_count = 0
+        for row_index in range(row_count):
+            status_item = self._speaker_binding_table.item(row_index, 3)
+            status_kind = str(status_item.data(Qt.ItemDataRole.UserRole) or "") if status_item else ""
+            if status_kind == "ok":
+                bound_count += 1
+            elif status_kind == "missing":
+                missing_count += 1
+            else:
+                unresolved_count += 1
+
+        if bound_count == 0:
+            self._speaker_binding_status.setText(
+                f"Speaker binding: có {row_count} speaker nhận diện. Nếu chưa lưu binding nào, toàn bộ track sẽ dùng preset mặc định."
+            )
+            return
+
+        details: list[str] = [f"{bound_count}/{row_count} speaker đã có preset riêng."]
+        if missing_count:
+            details.append(f"{missing_count} binding đang trỏ tới preset không còn tồn tại.")
+        if unresolved_count:
+            details.append("TTS sẽ bị chặn cho đến khi gán đủ các speaker đã nhận diện.")
+        else:
+            details.append("Đã đủ binding cho các speaker đã nhận diện.")
+        self._speaker_binding_status.setText("Speaker binding: " + " ".join(details))
+
+    def _set_speaker_binding_form_dirty(self, is_dirty: bool) -> None:
+        self._speaker_binding_dirty = is_dirty
+        marker = " Form hiện có thay đổi chưa lưu."
+        status_text = self._speaker_binding_status.text().strip()
+        if status_text:
+            if is_dirty and marker not in status_text:
+                self._speaker_binding_status.setText(status_text + marker)
+            elif not is_dirty and marker in status_text:
+                self._speaker_binding_status.setText(status_text.replace(marker, ""))
+        if is_dirty:
+            self._speaker_binding_hint.setText(
+                "Lưu ý: bạn đang có thay đổi speaker binding trên form nhưng chưa lưu. "
+                "TTS/export chỉ dùng mapping đã lưu trong dự án."
+            )
+        else:
+            self._speaker_binding_hint.setText(
+                "Mẹo: nếu đã lưu ít nhất 1 speaker binding, mọi speaker nhận diện rõ trong track hiện tại "
+                "phải được gán preset. Speaker unknown vẫn dùng preset mặc định."
+            )
+        self._sync_voice_summary_with_binding_form_state()
+
+    def _sync_voice_summary_with_binding_form_state(self) -> None:
+        summary_text = self._voice_summary.text().strip()
+        if not summary_text:
+            return
+        lines = [
+            line
+            for line in summary_text.splitlines()
+            if not line.startswith("- Speaker binding trên form:")
+        ]
+        if self._speaker_binding_dirty and self._speaker_binding_table.rowCount() > 0:
+            lines.append("- Speaker binding trên form: có thay đổi chưa lưu; hãy bấm Lưu binding để áp dụng")
+        self._voice_summary.setText("\n".join(lines))
+
+    def _handle_speaker_binding_selection_changed(self, row_index: int) -> None:
+        if self._speaker_binding_loading:
+            return
+        self._update_speaker_binding_row_status(row_index)
+        self._refresh_speaker_binding_status_summary()
+        self._set_speaker_binding_form_dirty(True)
+
+    def _fill_unbound_speakers_with_selected_preset(self) -> None:
+        preset_id = str(self._voice_combo.currentData() or "").strip()
+        if not preset_id:
+            QMessageBox.warning(self, "Speaker binding", "Hãy chọn preset giọng mặc định trước.")
+            return
+        changed = 0
+        for row_index in range(self._speaker_binding_table.rowCount()):
+            combo = self._speaker_binding_table.cellWidget(row_index, 2)
+            if not isinstance(combo, QComboBox):
+                continue
+            if str(combo.currentData() or "").strip():
+                continue
+            for combo_index in range(combo.count()):
+                if str(combo.itemData(combo_index) or "").strip() == preset_id:
+                    combo.setCurrentIndex(combo_index)
+                    changed += 1
+                    break
+        self._refresh_speaker_binding_status_summary()
+        if changed:
+            self._set_speaker_binding_form_dirty(True)
+            self._append_log_line(f"Đã gán preset hiện tại cho {changed} speaker chưa có binding")
+        else:
+            QMessageBox.information(self, "Speaker binding", "Không có speaker trống nào để gán nhanh.")
+
+    def _clear_speaker_binding_form(self) -> None:
+        changed = False
+        for row_index in range(self._speaker_binding_table.rowCount()):
+            combo = self._speaker_binding_table.cellWidget(row_index, 2)
+            if isinstance(combo, QComboBox):
+                if combo.currentIndex() != 0:
+                    changed = True
+                combo.setCurrentIndex(0)
+        self._refresh_speaker_binding_status_summary()
+        if changed:
+            self._set_speaker_binding_form_dirty(True)
+
+    def _reload_speaker_bindings(self) -> None:
+        self._speaker_binding_loading = True
+        self._speaker_binding_table.setRowCount(0)
+        if not self._current_workspace:
+            self._speaker_binding_status.setText("Speaker binding: chưa mở dự án")
+            self._speaker_binding_loading = False
+            self._set_speaker_binding_form_dirty(False)
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
+        if not analysis_rows:
+            self._speaker_binding_status.setText("Speaker binding: chưa có speaker từ Contextual V2")
+            self._speaker_binding_loading = False
+            self._set_speaker_binding_form_dirty(False)
+            return
+
+        character_name_map = self._character_name_map(database)
+        candidates = discover_speaker_candidates(analysis_rows, character_name_map=character_name_map)
+        binding_rows = database.list_speaker_bindings(self._current_workspace.project_id)
+        binding_map = {
+            (
+                str(row["speaker_type"] or "character").strip() or "character",
+                str(row["speaker_key"] or "").strip(),
+            ): str(row["voice_preset_id"] or "").strip()
+            for row in binding_rows
+            if str(row["speaker_key"] or "").strip()
+        }
+        available_preset_ids = {preset.voice_preset_id for preset in self._voice_presets}
+
+        for row_index, candidate in enumerate(candidates):
+            self._speaker_binding_table.insertRow(row_index)
+            speaker_item = QTableWidgetItem(candidate.label)
+            speaker_item.setData(
+                Qt.ItemDataRole.UserRole,
+                {"speaker_type": candidate.speaker_type, "speaker_key": candidate.speaker_key},
+            )
+            speaker_item.setFlags(speaker_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._speaker_binding_table.setItem(row_index, 0, speaker_item)
+
+            count_item = QTableWidgetItem(str(candidate.segment_count))
+            count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._speaker_binding_table.setItem(row_index, 1, count_item)
+
+            combo = QComboBox()
+            combo.addItem("Chưa gán", "")
+            for preset in self._voice_presets:
+                combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
+            selected_preset_id = binding_map.get((candidate.speaker_type, candidate.speaker_key), "")
+            if selected_preset_id:
+                for combo_index in range(combo.count()):
+                    if combo.itemData(combo_index) == selected_preset_id:
+                        combo.setCurrentIndex(combo_index)
+                        break
+            self._speaker_binding_table.setCellWidget(row_index, 2, combo)
+            combo.currentIndexChanged.connect(
+                lambda _index, row_index=row_index: self._handle_speaker_binding_selection_changed(row_index)
+            )
+            self._update_speaker_binding_row_status(row_index, available_preset_ids=available_preset_ids)
+
+        if not candidates:
+            self._speaker_binding_status.setText("Speaker binding: chưa có speaker nhận diện đủ rõ để gán")
+            self._speaker_binding_loading = False
+            self._set_speaker_binding_form_dirty(False)
+            return
+        self._speaker_binding_loading = False
+        self._refresh_speaker_binding_status_summary()
+        self._set_speaker_binding_form_dirty(False)
+
+    def _save_speaker_bindings(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Speaker binding", "Hãy tạo hoặc mở dự án trước.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        now = utc_now_iso()
+        bindings: list[SpeakerBindingRecord] = []
+        for row_index in range(self._speaker_binding_table.rowCount()):
+            speaker_item = self._speaker_binding_table.item(row_index, 0)
+            combo = self._speaker_binding_table.cellWidget(row_index, 2)
+            if speaker_item is None or not isinstance(combo, QComboBox):
+                continue
+            payload = speaker_item.data(Qt.ItemDataRole.UserRole) or {}
+            speaker_type = str(payload.get("speaker_type", "character") or "character").strip() or "character"
+            speaker_key = str(payload.get("speaker_key", "") or "").strip()
+            voice_preset_id = str(combo.currentData() or "").strip()
+            if not speaker_key or not voice_preset_id:
+                continue
+            bindings.append(
+                SpeakerBindingRecord(
+                    binding_id=f"bind:{speaker_type}:{speaker_key}",
+                    project_id=self._current_workspace.project_id,
+                    speaker_type=speaker_type,
+                    speaker_key=speaker_key,
+                    voice_preset_id=voice_preset_id,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        database.replace_speaker_bindings(self._current_workspace.project_id, bindings)
+        self._set_speaker_binding_form_dirty(False)
+        self._invalidate_subtitle_pipeline_outputs(clear_tts_audio=True)
+        self._reload_speaker_bindings()
+        self._refresh_workspace_views()
+        self._append_log_line(f"Đã lưu {len(bindings)} speaker binding")
+        QMessageBox.information(
+            self,
+            "Speaker binding",
+            (
+                f"Đã lưu {len(bindings)} speaker binding.\n"
+                "- Nếu đã thay đổi mapping giọng, hãy chạy lại TTS rồi tạo lại track giọng."
+            ),
+        )
+
+    def _resolve_tts_voice_plan(
+        self,
+        database: ProjectDatabase,
+        subtitle_rows: list[object],
+        *,
+        require_localized: bool,
+        dialog_title: str,
+        warn_on_unresolved: bool,
+    ) -> tuple[object | None, dict[str, object] | None, dict[str, str] | None, object]:
+        default_preset = self._selected_voice_preset(strict=False)
+        if default_preset is None:
+            if warn_on_unresolved:
+                QMessageBox.warning(self, dialog_title, "Không tìm thấy preset giọng trong dự án.")
+            return None, None, None, None
+
+        available_presets = {preset.voice_preset_id: preset for preset in self._voice_presets}
+        available_presets[default_preset.voice_preset_id] = default_preset
+        voice_rows = [
+            row
+            for row in subtitle_rows
+            if self._tts_output_text(row, require_localized=require_localized)
+        ]
+        binding_rows = (
+            database.list_speaker_bindings(self._current_workspace.project_id) if self._current_workspace else []
+        )
+        analysis_rows = (
+            database.list_segment_analyses(self._current_workspace.project_id) if self._current_workspace else []
+        )
+        plan = build_speaker_binding_plan(
+            subtitle_rows=voice_rows,
+            analysis_rows=analysis_rows,
+            binding_rows=binding_rows,
+            available_preset_ids=set(available_presets),
+        )
+        if not plan.active_bindings:
+            return default_preset, None, plan.segment_speaker_keys or None, plan
+
+        if plan.missing_preset_ids or plan.unresolved_speakers:
+            if warn_on_unresolved:
+                lines = ["Speaker binding hiện chưa đầy đủ, chưa thể chạy TTS an toàn."]
+                if plan.unresolved_speakers:
+                    lines.append(f"- Speaker chưa gán preset: {', '.join(plan.unresolved_speakers)}")
+                if plan.missing_preset_ids:
+                    lines.append(f"- Preset không còn tồn tại: {', '.join(plan.missing_preset_ids)}")
+                lines.append("- Hãy vào tab Lồng tiếng, hoàn tất bảng gán speaker rồi thử lại.")
+                QMessageBox.warning(self, dialog_title, "\n".join(lines))
+            return default_preset, None, plan.segment_speaker_keys or None, plan
+
+        segment_voice_presets = {
+            segment_id: available_presets[preset_id]
+            for segment_id, preset_id in plan.segment_voice_preset_ids.items()
+        }
+        return default_preset, segment_voice_presets or None, plan.segment_speaker_keys or None, plan
 
     @staticmethod
     def _parse_voice_float_value(
@@ -3848,10 +4232,24 @@ class MainWindow(QMainWindow):
         if not self._ensure_contextual_semantic_ready(database, dialog_title="TTS"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
+        preset, segment_voice_presets, segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
+            database,
+            subtitle_rows,
+            require_localized=require_localized,
+            dialog_title="TTS",
+            warn_on_unresolved=True,
+        )
+        if preset is None:
+            return None
         stage_hash = build_tts_stage_hash(
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
+            segment_voice_preset_ids=(
+                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
+                if segment_voice_presets
+                else None
+            ),
         )
 
         def handler(context: JobContext) -> JobResult:
@@ -3887,6 +4285,8 @@ class MainWindow(QMainWindow):
                 preset=preset,
                 engine=create_tts_engine(preset, project_root=workspace.root_dir),
                 allow_source_fallback=not require_localized,
+                segment_voice_presets=segment_voice_presets,
+                segment_speaker_keys=segment_speaker_keys,
             )
             database.apply_subtitle_event_audio_paths(
                 workspace.project_id,
@@ -3945,10 +4345,24 @@ class MainWindow(QMainWindow):
         if not self._ensure_contextual_semantic_ready(database, dialog_title="Track giọng"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
+        preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
+            database,
+            subtitle_rows,
+            require_localized=require_localized,
+            dialog_title="Track giọng",
+            warn_on_unresolved=True,
+        )
+        if preset is None:
+            return None
         stage_hash = build_tts_stage_hash(
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
+            segment_voice_preset_ids=(
+                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
+                if segment_voice_presets
+                else None
+            ),
         )
         cached = load_synthesized_segments(workspace, stage_hash)
         if not cached:
@@ -4049,10 +4463,24 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Chưa có track giọng", "Hãy tạo track giọng trước khi trộn âm thanh.")
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
+        preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
+            database,
+            subtitle_rows,
+            require_localized=require_localized,
+            dialog_title="Trộn âm thanh",
+            warn_on_unresolved=True,
+        )
+        if preset is None:
+            return None
         stage_hash = build_tts_stage_hash(
             subtitle_rows,
             preset,
             allow_source_fallback=not require_localized,
+            segment_voice_preset_ids=(
+                {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
+                if segment_voice_presets
+                else None
+            ),
         )
         cached = load_synthesized_segments(workspace, stage_hash)
         if not cached:
@@ -4218,13 +4646,21 @@ class MainWindow(QMainWindow):
         if not self._ensure_qc_passed_for_export(subtitle_rows, dialog_title="Xuất video"):
             return None
         require_localized = self._requires_localized_output(database, subtitle_rows)
+        preset, segment_voice_presets, _segment_speaker_keys, _voice_plan = self._resolve_tts_voice_plan(
+            database,
+            subtitle_rows,
+            require_localized=require_localized,
+            dialog_title="Xuất video",
+            warn_on_unresolved=True,
+        )
+        if preset is None:
+            return None
 
         video_row = database.get_primary_video_asset(workspace.project_id)
         duration_ms = int(video_row["duration_ms"]) if video_row and video_row["duration_ms"] else None
         ffmpeg_path = self._settings.dependency_paths.ffmpeg_path
         replacement_audio_path: Path | None = None
         if self._last_voice_track_output and self._last_voice_track_output.exists():
-            preset = self._selected_voice_preset()
             if not preset:
                 QMessageBox.warning(
                     self,
@@ -4239,6 +4675,11 @@ class MainWindow(QMainWindow):
                 preset=preset,
                 total_duration_ms=total_duration_ms,
                 require_localized=require_localized,
+                segment_voice_preset_ids=(
+                    {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
+                    if segment_voice_presets
+                    else None
+                ),
             )
             if missing_tts_indexes:
                 self._focus_subtitle_table_row(missing_tts_indexes[0])
@@ -4517,6 +4958,7 @@ class MainWindow(QMainWindow):
 
         database = ProjectDatabase(self._current_workspace.database_path)
         project_row = database.get_project()
+        self._reload_speaker_bindings()
         video_row = database.get_primary_video_asset(self._current_workspace.project_id)
         if video_row:
             self._media_summary.setText(
@@ -4593,19 +5035,57 @@ class MainWindow(QMainWindow):
             self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
 
         current_preset = self._selected_voice_preset()
+        resolved_preset = current_preset
+        segment_voice_preset_ids: dict[str, str] | None = None
+        speaker_binding_lines: list[str] = []
+        voice_binding_ready = True
+        if database and subtitle_rows:
+            resolved_preset, segment_voice_presets, _segment_speaker_keys, voice_plan = self._resolve_tts_voice_plan(
+                database,
+                subtitle_rows,
+                require_localized=require_localized,
+                dialog_title="Lá»“ng tiáº¿ng",
+                warn_on_unresolved=False,
+            )
+            if voice_plan is not None:
+                segment_voice_preset_ids = (
+                    {segment_id: item.voice_preset_id for segment_id, item in segment_voice_presets.items()}
+                    if segment_voice_presets
+                    else None
+                )
+                if getattr(voice_plan, "active_bindings", False):
+                    if getattr(voice_plan, "unresolved_speakers", None):
+                        voice_binding_ready = False
+                        speaker_binding_lines.append(
+                            "- Speaker binding: chÆ°a Ä‘á»§, cÃ²n speaker chÆ°a gÃ¡n preset "
+                            + f"({', '.join(voice_plan.unresolved_speakers)})"
+                        )
+                    elif getattr(voice_plan, "missing_preset_ids", None):
+                        voice_binding_ready = False
+                        speaker_binding_lines.append(
+                            "- Speaker binding: cÃ³ binding trá» tá»›i preset khÃ´ng cÃ²n tá»“n táº¡i "
+                            + f"({', '.join(voice_plan.missing_preset_ids)})"
+                        )
+                    else:
+                        speaker_binding_lines.append(
+                            f"- Speaker binding: Ä‘Ã£ gÃ¡n theo speaker cho {len(voice_plan.segment_voice_preset_ids)} dÃ²ng"
+                        )
+                else:
+                    speaker_binding_lines.append("- Speaker binding: chÆ°a báº­t, toÃ n bá»™ sáº½ dÃ¹ng preset máº·c Ä‘á»‹nh")
         tts_ready_count = sum(1 for row in subtitle_rows if row["audio_path"])
         total_duration_ms = int(video_row["duration_ms"]) if video_row and video_row["duration_ms"] else (
             max((int(row["end_ms"]) for row in subtitle_rows), default=0)
         )
         expected_voice_track_path = None
         voice_track_ready = False
-        if current_preset and subtitle_rows and total_duration_ms > 0:
+        if resolved_preset and subtitle_rows and total_duration_ms > 0:
             expected_voice_track_path, missing_tts_indexes = self._expected_voice_track_path_for_rows(
                 workspace=self._current_workspace,
                 subtitle_rows=subtitle_rows,
-                preset=current_preset,
+                preset=resolved_preset,
                 total_duration_ms=total_duration_ms,
                 require_localized=require_localized,
+                segment_voice_preset_ids=segment_voice_preset_ids,
             )
             voice_track_ready = bool(
                 expected_voice_track_path
@@ -4614,6 +5094,8 @@ class MainWindow(QMainWindow):
                 and self._last_voice_track_output.exists()
                 and expected_voice_track_path.resolve() == self._last_voice_track_output.resolve()
             )
+            if not voice_binding_ready:
+                voice_track_ready = False
         voice_lines = [
             "Lồng tiếng:",
             f"- Số preset giọng: {len(self._voice_presets)}",
@@ -4633,6 +5115,9 @@ class MainWindow(QMainWindow):
                 voice_lines.append("- eSpeak NG: chưa tìm thấy cho VieNeu local")
         else:
             voice_lines.append("- VieNeu SDK: chưa cài")
+        voice_lines.extend(speaker_binding_lines)
+        if not voice_binding_ready:
+            voice_lines.append("- Trạng thái binding: chưa an toàn để chạy TTS hoặc xuất video")
         if current_preset and current_preset.engine.lower() == "vieneu":
             try:
                 voice_lines.append(f"- Chế độ VieNeu: {get_vieneu_mode(current_preset)}")

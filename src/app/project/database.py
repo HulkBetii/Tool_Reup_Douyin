@@ -15,11 +15,12 @@ from app.project.models import (
     SceneMemoryRecord,
     SegmentRecord,
     SegmentAnalysisRecord,
+    SpeakerBindingRecord,
     SubtitleEventRecord,
     SubtitleTrackRecord,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 CANONICAL_SUBTITLE_TRACK_KIND = "canonical"
 USER_SUBTITLE_TRACK_KIND = "user"
 
@@ -255,6 +256,22 @@ CREATE INDEX IF NOT EXISTS idx_scene_memories_project_id ON scene_memories(proje
 CREATE UNIQUE INDEX IF NOT EXISTS idx_scene_memories_project_scene_index ON scene_memories(project_id, scene_index);
 CREATE INDEX IF NOT EXISTS idx_segment_analyses_project_id ON segment_analyses(project_id);
 CREATE INDEX IF NOT EXISTS idx_segment_analyses_scene_id ON segment_analyses(scene_id);
+
+CREATE TABLE IF NOT EXISTS speaker_bindings (
+    binding_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    speaker_type TEXT NOT NULL DEFAULT 'character',
+    speaker_key TEXT NOT NULL,
+    voice_preset_id TEXT NOT NULL,
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY(project_id) REFERENCES projects(project_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_speaker_bindings_unique
+ON speaker_bindings(project_id, speaker_type, speaker_key);
+CREATE INDEX IF NOT EXISTS idx_speaker_bindings_project_id ON speaker_bindings(project_id);
 """
 
 
@@ -537,6 +554,46 @@ class ProjectDatabase:
                 """,
                 (preset_id, updated_at or _utc_now_iso(), project_id),
             )
+
+    def replace_speaker_bindings(self, project_id: str, bindings: list[SpeakerBindingRecord]) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM speaker_bindings WHERE project_id = ?", (project_id,))
+            if not bindings:
+                return
+            connection.executemany(
+                """
+                INSERT INTO speaker_bindings(
+                    binding_id, project_id, speaker_type, speaker_key, voice_preset_id,
+                    notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        binding.binding_id,
+                        binding.project_id,
+                        binding.speaker_type,
+                        binding.speaker_key,
+                        binding.voice_preset_id,
+                        binding.notes,
+                        binding.created_at,
+                        binding.updated_at,
+                    )
+                    for binding in bindings
+                ],
+            )
+
+    def list_speaker_bindings(self, project_id: str) -> list[sqlite3.Row]:
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM speaker_bindings
+                WHERE project_id = ?
+                ORDER BY speaker_type ASC, speaker_key ASC
+                """,
+                (project_id,),
+            ).fetchall()
 
     def get_active_export_preset_id(self, project_id: str) -> str | None:
         with self.connect() as connection:
