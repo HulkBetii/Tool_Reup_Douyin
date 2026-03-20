@@ -3,6 +3,36 @@
   "description": "Stable semantic QC reference cases. Each entry declares the expected QC outcome so refactors can be checked against intentional behavior.",
   "cases": [
     {
+      "fixture_id": "zh-vi-real-reviewed-object-reference-safe",
+      "path": "tests/fixtures/golden/zh-vi-real-reviewed-object-reference-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "pronoun_without_evidence",
+          "addressee_mismatch",
+          "sub_tts_pronoun_divergence",
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-real-wilderness-narration-safe",
+      "path": "tests/fixtures/golden/zh-vi-real-wilderness-narration-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "pronoun_without_evidence",
+          "addressee_mismatch",
+          "sub_tts_pronoun_divergence",
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
       "fixture_id": "zh-vi-real-cartoon-dialogue-safe",
       "path": "tests/fixtures/golden/zh-vi-real-cartoon-dialogue-safe.json",
       "expected": {

@@ -1,0 +1,76 @@
+{
+  "fixture_id": "zh-vi-real-wilderness-narration-safe",
+  "class": "real_world_wilderness_narration_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thật từ Wilderness sau review: thuyết minh kỹ thuật trung tính, không listener, object phrase đã được làm rõ bằng tiếng Việt tự nhiên.",
+  "segments": [
+    {
+      "segment_id": "seg-real-0400",
+      "segment_index": 24,
+      "scene_id": "scene_real_0200",
+      "source_text": "来给必不所制作的华伦索道",
+      "speaker_json": {
+        "character_id": "王德发",
+        "confidence": 0.9
+      },
+      "listeners_json": [],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": true,
+        "confidence": 0.9
+      },
+      "confidence_json": {
+        "overall": 0.85,
+        "speaker": 0.9,
+        "listener": 0.7,
+        "register": 0.85,
+        "relation": 0.6,
+        "translation": 0.85
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.82
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Rồi anh ấy tự chế luôn một bộ cáp kéo đất.",
+      "approved_tts_text": "Rồi anh ấy tự chế luôn một bộ cáp kéo đất."
+    },
+    {
+      "segment_id": "seg-real-0401",
+      "segment_index": 71,
+      "scene_id": "scene_real_0200",
+      "source_text": "就可以把岛热孔竹布打开",
+      "speaker_json": {
+        "character_id": "王德发",
+        "confidence": 0.9
+      },
+      "listeners_json": [],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": true,
+        "confidence": 1.0
+      },
+      "confidence_json": {
+        "overall": 0.88,
+        "speaker": 0.9,
+        "listener": 0.8,
+        "register": 0.9,
+        "relation": 0.7,
+        "translation": 0.85
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.82
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Thì có thể đặt hệ ống dẫn nhiệt xuống.",
+      "approved_tts_text": "Thì có thể đặt hệ ống dẫn nhiệt xuống."
+    }
+  ]
+}

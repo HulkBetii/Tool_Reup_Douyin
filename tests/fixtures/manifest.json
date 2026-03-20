@@ -19,6 +19,28 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-real-reviewed-object-reference-safe",
+      "class": "real_world_reviewed_object_reference_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-real-reviewed-object-reference-safe.json",
+      "notes": "Case thật từ Shinchan sau review, referent mơ hồ đã được chốt thành object cụ thể và phải tiếp tục pass sạch."
+    },
+    {
+      "fixture_id": "zh-vi-real-wilderness-narration-safe",
+      "class": "real_world_wilderness_narration_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-real-wilderness-narration-safe.json",
+      "notes": "Case thật từ Wilderness sau review, thuyết minh kỹ thuật/object phrase phải tiếp tục pass sạch trong semantic QC."
+    },
+    {
       "fixture_id": "zh-vi-real-cartoon-dialogue-safe",
       "class": "real_world_dialogue_safe",
       "languages": [

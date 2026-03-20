@@ -1,0 +1,50 @@
+{
+  "fixture_id": "zh-vi-real-reviewed-object-reference-safe",
+  "class": "real_world_reviewed_object_reference_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thật từ Shinchan sau review: object reference mơ hồ đã được chốt thành `ô`, subtitle/TTS trùng nhau và không được bị semantic QC flag nhầm.",
+  "segments": [
+    {
+      "segment_id": "seg-real-0300",
+      "segment_index": 25,
+      "scene_id": "scene_real_0100",
+      "source_text": "这把有坏了",
+      "speaker_json": {
+        "character_id": "unknown",
+        "confidence": 0.9
+      },
+      "listeners_json": [
+        {
+          "character_id": "unknown",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "neutral-reviewed",
+        "self_term": "",
+        "address_term": "",
+        "locked": false,
+        "confidence": 0.9
+      },
+      "confidence_json": {
+        "overall": 0.9,
+        "speaker": 0.9,
+        "listener": 0.9,
+        "register": 0.9,
+        "relation": 0.8,
+        "translation": 0.9
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.85
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Cái ô này hỏng rồi.",
+      "approved_tts_text": "Cái ô này hỏng rồi."
+    }
+  ]
+}

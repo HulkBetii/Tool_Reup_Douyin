@@ -55,3 +55,5 @@ Initial dataset covers:
 - side-specific alternate contract
 - reviewed real-world dialogue from `Video_test_TQ`
 - real-world fail-safe cases for pronoun divergence and low-confidence single-turn ambiguity
+- reviewed object-reference cases from `Shinchan`
+- reviewed technical narration/object phrase cases from `Wilderness`
