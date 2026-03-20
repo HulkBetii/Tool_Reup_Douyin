@@ -239,6 +239,50 @@
       "notes": "Neu da bat dau gan speaker -> voice preset thi moi speaker da nhan dien trong track dang dung phai duoc gan day du; neu khong TTS phai block thay vi doan preset."
     },
     {
+      "fixture_id": "zh-vi-character-voice-policy-fallback",
+      "class": "character_voice_policy_fallback",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-character-voice-policy-fallback.json",
+      "notes": "Character voice policy la fallback mem: speaker co policy rieng se duoc map sang preset tuong ung, con speaker khac van roi ve preset mac dinh."
+    },
+    {
+      "fixture_id": "zh-vi-relationship-voice-policy-overrides-character",
+      "class": "relationship_voice_policy_override",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-relationship-voice-policy-overrides-character.json",
+      "notes": "Quan he speaker->listener neu duoc gan voice policy thi phai uu tien hon character voice policy."
+    },
+    {
+      "fixture_id": "zh-vi-explicit-speaker-binding-wins-over-policy",
+      "class": "speaker_binding_precedence_over_voice_policy",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-explicit-speaker-binding-wins-over-policy.json",
+      "notes": "Explicit speaker binding van la muc uu tien cao nhat va khong duoc bi voice policy ghi de."
+    },
+    {
+      "fixture_id": "zh-vi-voice-policy-missing-preset-blocks",
+      "class": "voice_policy_missing_preset_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/zh-vi-voice-policy-missing-preset-blocks.json",
+      "notes": "Neu voice policy da chon preset nhung preset do khong con ton tai thi downstream phai block, khong duoc lang le roi ve fallback."
+    },
+    {
       "fixture_id": "zh-vi-speaker-binding-unknown-placeholder-falls-back",
       "class": "speaker_binding_unknown_placeholder_fallback",
       "languages": [

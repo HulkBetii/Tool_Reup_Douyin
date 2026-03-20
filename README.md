@@ -53,6 +53,7 @@ Slice da duoc khoi tao trong repo nay:
 - Khoi phuc lai TTS manifest / voice track / mixed audio / subtitle outputs / export output khi mo lai project
 - Workflow nhanh de chain `Prepare media`, `ASR -> Dich`, `Long tieng nhanh`, `Full pipeline`
 - Manual speaker -> voice preset binding theo project, co fail-safe gate truoc TTS/export va fallback an toan cho placeholder speaker `unknown_*`
+- Voice policy theo nhan vat/quan he: relationship override > character fallback > preset mac dinh, van ton trong speaker binding la muc uu tien cao nhat
 - PyInstaller spec + PowerShell build scripts + Inno Setup script cho ban Windows may sach
 
 ## Cau truc
@@ -65,7 +66,7 @@ src/app/
   asr/          # ASR abstraction + faster-whisper + persistence
   translate/    # prompt presets, contextual V2 runtime, semantic QC
   subtitle/     # subtitle editor helpers, QC, preview, export
-  tts/          # TTS engines, voice presets, speaker binding
+  tts/          # TTS engines, voice presets, speaker binding, voice policy
   audio/        # voice track + mixdown
   ui/           # main window, tabs, status panel
 tests/          # unit + integration + regression fixtures
@@ -134,6 +135,7 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
 - TTS local/VieNeu + voice track + mixdown + hard-sub/soft-sub export
 - preset persistence cho voice/export/watermark
 - manual speaker -> voice preset binding theo project
+- voice policy theo nhan vat/quan he tren nen speaker binding
 - regression harness cho semantic bugs:
   - fixture manifest
   - regression/golden fixtures
@@ -157,5 +159,6 @@ Huong tiep theo hop ly:
 
 - mo rong golden semantic dataset tu cac bug that da gap
 - them regression test truc tiep cho cac helper/script downstream quan trong
-- nang cap voice policy theo nhan vat/quan he
+- mo rong golden semantic dataset tu cac bug that da gap
+- polish review UI / bulk actions cho semantic va voice policy
 - polish bulk actions trong review UI

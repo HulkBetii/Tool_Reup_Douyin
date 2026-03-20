@@ -65,7 +65,7 @@ This is a practical working map for regression-first debugging.
     - [src/app/subtitle/hardsub.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\subtitle\hardsub.py)
 
 - tts / audio
-  - TTS engines, voice presets, speaker binding, stage hashing, voice track building, mixdown
+  - TTS engines, voice presets, speaker binding, voice policy, stage hashing, voice track building, mixdown
   - key files:
     - [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py)
     - [src/app/tts/presets.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\presets.py)
@@ -95,6 +95,7 @@ Canonical project state is centered in [src/app/project/database.py](C:\Users\Hu
 - `scene_memories`
 - `segment_analyses`
 - `speaker_bindings`
+- `voice_policies`
 
 Important distinction:
 
@@ -114,7 +115,7 @@ Important distinction:
 6. contextual outputs are applied back into canonical `segments`
 7. canonical outputs sync into canonical subtitle track
 8. user edits live in user subtitle tracks
-9. speaker binding (neu co) resolve `speaker -> voice preset`
+9. speaker binding / voice policy resolve per-segment `voice preset`
 10. TTS uses subtitle rows / `tts_text`
 11. voice track + mixdown produce audio artifacts
 12. export uses active subtitle track + optional mixed audio
@@ -178,6 +179,29 @@ Current contract:
 - no saved bindings => global preset behavior
 - active bindings + unresolved recognized speaker => fail-safe block
 - `unknown_*` placeholder speakers => fallback to global preset
+
+### Voice policy theo nhan vat / quan he
+
+- persistence:
+  - [src/app/project/database.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\database.py)
+  - `voice_policies` table
+- resolver:
+  - [src/app/tts/speaker_binding.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\speaker_binding.py)
+- UI:
+  - [src/app/ui/main_window.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ui\main_window.py)
+- downstream script/runtime:
+  - [scripts/rerun_contextual_downstream.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\rerun_contextual_downstream.py)
+
+Current precedence:
+- explicit speaker binding
+- relationship voice policy (`speaker -> listener`)
+- character voice policy
+- global preset
+
+Fail-safe contract:
+- missing preset inside the selected binding/policy source => block
+- unresolved recognized speaker still blocks when explicit speaker binding mode is active
+- unknown placeholder speakers do not trigger manual policy/binding requirements
 
 ## Current weak spots for regression-oriented development
 

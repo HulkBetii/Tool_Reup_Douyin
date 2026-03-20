@@ -1,0 +1,39 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "tts_text": "Nghe theo anh."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.98
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "confidence": 0.95
+        }
+      ]
+    }
+  ],
+  "binding_rows": [],
+  "voice_policy_rows": [
+    {
+      "policy_id": "voicepolicy:relationship:char_a:char_b",
+      "project_id": "project-1",
+      "policy_scope": "relationship",
+      "speaker_character_id": "char_a",
+      "listener_character_id": "char_b",
+      "voice_preset_id": "voice-missing"
+    }
+  ],
+  "available_preset_ids": [
+    "voice-a",
+    "default-sapi"
+  ]
+}

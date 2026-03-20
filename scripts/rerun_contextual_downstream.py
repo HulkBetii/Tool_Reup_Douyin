@@ -56,17 +56,19 @@ def _resolve_segment_voice_plan(
     available_presets = {preset.voice_preset_id: preset for preset in list_voice_presets(workspace.root_dir)}
     available_presets[default_preset.voice_preset_id] = default_preset
     binding_rows = database.list_speaker_bindings(workspace.project_id)
+    voice_policy_rows = database.list_voice_policies(workspace.project_id)
     analysis_rows = database.list_segment_analyses(workspace.project_id)
     plan = build_speaker_binding_plan(
         subtitle_rows=segments,
         analysis_rows=analysis_rows,
         binding_rows=binding_rows,
+        voice_policy_rows=voice_policy_rows,
         available_preset_ids=set(available_presets),
     )
-    if not plan.active_bindings:
+    if not plan.active_bindings and not plan.active_voice_policies:
         return None, plan.segment_speaker_keys or None, plan
     if plan.unresolved_speakers or plan.missing_preset_ids:
-        lines = ["Speaker binding hien chua day du, chua the rerun downstream an toan."]
+        lines = ["Voice plan hien chua day du, chua the rerun downstream an toan."]
         if plan.unresolved_speakers:
             lines.append(f"- Speaker chua gan preset: {', '.join(plan.unresolved_speakers)}")
         if plan.missing_preset_ids:
@@ -202,9 +204,12 @@ def main() -> int:
         "export_preset_id": args.export_preset_id,
         "pending_review_count": pending_review_count,
         "speaker_binding_active": bool(getattr(voice_plan, "active_bindings", False)),
+        "voice_policy_active": bool(getattr(voice_plan, "active_voice_policies", False)),
         "speaker_binding_unresolved": list(getattr(voice_plan, "unresolved_speakers", [])),
         "speaker_binding_missing_preset_ids": list(getattr(voice_plan, "missing_preset_ids", [])),
         "speaker_bound_segment_count": len(getattr(voice_plan, "segment_voice_preset_ids", {})),
+        "character_policy_hits": int(getattr(voice_plan, "character_policy_hits", 0)),
+        "relationship_policy_hits": int(getattr(voice_plan, "relationship_policy_hits", 0)),
         "tts_manifest": str(synthesized.manifest_path),
         "voice_track_path": str(voice_track.voice_track_path),
         "mixed_audio_path": str(mixed_audio.mixed_audio_path),

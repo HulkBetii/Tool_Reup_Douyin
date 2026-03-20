@@ -60,6 +60,7 @@ from app.project.models import (
     ProjectWorkspace,
     SpeakerBindingRecord,
     SubtitleTrackRecord,
+    VoicePolicyRecord,
 )
 from app.project.runtime_state import restore_pipeline_state
 from app.subtitle.editing import (
@@ -78,7 +79,11 @@ from app.subtitle.qc import SubtitleQcConfig, SubtitleQcIssue, SubtitleQcReport,
 from app.tts.base import build_tts_stage_hash
 from app.tts.factory import create_tts_engine
 from app.tts.pipeline import load_synthesized_segments, synthesize_segments
-from app.tts.speaker_binding import build_speaker_binding_plan, discover_speaker_candidates
+from app.tts.speaker_binding import (
+    build_speaker_binding_plan,
+    discover_relationship_voice_policy_candidates,
+    discover_speaker_candidates,
+)
 from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 from app.tts.presets import (
     batch_import_voice_clone_presets,
@@ -143,6 +148,8 @@ class MainWindow(QMainWindow):
         self._workflow_name: str | None = None
         self._speaker_binding_loading = False
         self._speaker_binding_dirty = False
+        self._voice_policy_loading = False
+        self._voice_policy_dirty = False
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1360, 860)
@@ -607,6 +614,10 @@ class MainWindow(QMainWindow):
         self._speaker_binding_hint = self._create_info_label(
             "Mẹo: nếu đã lưu ít nhất 1 speaker binding, mọi speaker nhận diện rõ trong track hiện tại phải được gán preset. Speaker unknown vẫn dùng preset mặc định."
         )
+        self._voice_policy_status = self._create_info_label("Voice policy: chưa có dữ liệu")
+        self._voice_policy_hint = self._create_info_label(
+            "Mẹo: voice policy là fallback mềm. Quan hệ speaker->listener sẽ ưu tiên hơn policy theo nhân vật, nhưng speaker binding vẫn là mức ưu tiên cao nhất."
+        )
         self._voice_notes_input = QPlainTextEdit()
         self._voice_notes_input.setPlaceholderText("Ghi chú preset hoặc ghi chú về cấu hình clone")
         self._voice_notes_input.setFixedHeight(56)
@@ -635,6 +646,34 @@ class MainWindow(QMainWindow):
         speaker_binding_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         speaker_binding_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         speaker_binding_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._character_voice_policy_table = QTableWidget(0, 4)
+        self._character_voice_policy_table.setHorizontalHeaderLabels(
+            ["Nhân vật", "Số dòng", "Preset mặc định", "Trạng thái"]
+        )
+        self._character_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._character_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._character_voice_policy_table.setAlternatingRowColors(True)
+        self._character_voice_policy_table.verticalHeader().setVisible(False)
+        self._character_voice_policy_table.setMinimumHeight(140)
+        character_policy_header = self._character_voice_policy_table.horizontalHeader()
+        character_policy_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        character_policy_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        character_policy_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        character_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        self._relationship_voice_policy_table = QTableWidget(0, 4)
+        self._relationship_voice_policy_table.setHorizontalHeaderLabels(
+            ["Quan hệ", "Số dòng", "Preset override", "Trạng thái"]
+        )
+        self._relationship_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._relationship_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._relationship_voice_policy_table.setAlternatingRowColors(True)
+        self._relationship_voice_policy_table.verticalHeader().setVisible(False)
+        self._relationship_voice_policy_table.setMinimumHeight(140)
+        relationship_policy_header = self._relationship_voice_policy_table.horizontalHeader()
+        relationship_policy_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        relationship_policy_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        relationship_policy_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        relationship_policy_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
 
         reload_voices_button = QPushButton("Nạp lại preset")
         reload_voices_button.clicked.connect(self._reload_voice_presets)
@@ -662,6 +701,14 @@ class MainWindow(QMainWindow):
         self._fill_speaker_bindings_button.clicked.connect(self._fill_unbound_speakers_with_selected_preset)
         self._clear_speaker_bindings_button = QPushButton("Xóa gán trên form")
         self._clear_speaker_bindings_button.clicked.connect(self._clear_speaker_binding_form)
+        self._reload_voice_policies_button = QPushButton("Nạp voice policy")
+        self._reload_voice_policies_button.clicked.connect(self._reload_voice_policies)
+        self._save_voice_policies_button = QPushButton("Lưu voice policy")
+        self._save_voice_policies_button.clicked.connect(self._save_voice_policies)
+        self._fill_voice_policies_button = QPushButton("Gán preset đang chọn cho policy trống")
+        self._fill_voice_policies_button.clicked.connect(self._fill_unbound_voice_policies_with_selected_preset)
+        self._clear_voice_policies_button = QPushButton("Xóa policy trên form")
+        self._clear_voice_policies_button.clicked.connect(self._clear_voice_policy_form)
         choose_bgm_button = QPushButton("Chọn BGM")
         choose_bgm_button.clicked.connect(self._choose_bgm_file)
         mix_button = QPushButton("Trộn âm thanh")
@@ -700,6 +747,14 @@ class MainWindow(QMainWindow):
         speaker_binding_actions.addStretch(1)
         speaker_binding_actions_container = QWidget()
         speaker_binding_actions_container.setLayout(speaker_binding_actions)
+        voice_policy_actions = QHBoxLayout()
+        voice_policy_actions.addWidget(self._reload_voice_policies_button)
+        voice_policy_actions.addWidget(self._save_voice_policies_button)
+        voice_policy_actions.addWidget(self._fill_voice_policies_button)
+        voice_policy_actions.addWidget(self._clear_voice_policies_button)
+        voice_policy_actions.addStretch(1)
+        voice_policy_actions_container = QWidget()
+        voice_policy_actions_container.setLayout(voice_policy_actions)
 
         ref_audio_row = QHBoxLayout()
         ref_audio_row.addWidget(self._vieneu_ref_audio_input)
@@ -762,6 +817,11 @@ class MainWindow(QMainWindow):
         form.addRow("", self._speaker_binding_hint)
         form.addRow("Bảng gán speaker", self._speaker_binding_table)
         form.addRow("", speaker_binding_actions_container)
+        form.addRow("Voice policy", self._voice_policy_status)
+        form.addRow("", self._voice_policy_hint)
+        form.addRow("Policy theo nhân vật", self._character_voice_policy_table)
+        form.addRow("Policy theo quan hệ", self._relationship_voice_policy_table)
+        form.addRow("", voice_policy_actions_container)
         form.addRow("BGM tùy chọn", bgm_container)
         form.addRow("Mức âm khi trộn", mix_container)
 
@@ -2179,6 +2239,7 @@ class MainWindow(QMainWindow):
             self._voice_info.setText("Runtime giọng đọc: chưa mở dự án")
             self._sync_voice_preset_form()
             self._reload_speaker_bindings()
+            self._reload_voice_policies()
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         project_selected_preset_id = database.get_active_voice_preset_id(self._current_workspace.project_id)
@@ -2219,6 +2280,7 @@ class MainWindow(QMainWindow):
         self._voice_info.setText("\n".join(voice_lines))
         self._sync_voice_preset_form()
         self._reload_speaker_bindings()
+        self._reload_voice_policies()
 
     def _reload_export_presets(self) -> None:
         if not self._current_workspace:
@@ -2715,9 +2777,14 @@ class MainWindow(QMainWindow):
             line
             for line in summary_text.splitlines()
             if not line.startswith("- Speaker binding trên form:")
+            and not line.startswith("- Voice policy trên form:")
         ]
         if self._speaker_binding_dirty and self._speaker_binding_table.rowCount() > 0:
             lines.append("- Speaker binding trên form: có thay đổi chưa lưu; hãy bấm Lưu binding để áp dụng")
+        if self._voice_policy_dirty and (
+            self._character_voice_policy_table.rowCount() > 0 or self._relationship_voice_policy_table.rowCount() > 0
+        ):
+            lines.append("- Voice policy trên form: có thay đổi chưa lưu; hãy bấm Lưu voice policy để áp dụng")
         self._voice_summary.setText("\n".join(lines))
 
     def _handle_speaker_binding_selection_changed(self, row_index: int) -> None:
@@ -2875,6 +2942,376 @@ class MainWindow(QMainWindow):
             ),
         )
 
+    def _set_voice_policy_row_status(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        *,
+        status_text: str,
+        status_kind: str,
+    ) -> None:
+        status_item = table.item(row_index, 3)
+        if status_item is None:
+            status_item = QTableWidgetItem()
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            table.setItem(row_index, 3, status_item)
+        status_item.setText(status_text)
+        status_item.setData(Qt.ItemDataRole.UserRole, status_kind)
+        status_item.setBackground(self._speaker_binding_status_color(status_kind))
+
+    def _update_voice_policy_row_status(
+        self,
+        table: QTableWidget,
+        row_index: int,
+        *,
+        available_preset_ids: set[str] | None = None,
+    ) -> None:
+        combo = table.cellWidget(row_index, 2)
+        if not isinstance(combo, QComboBox):
+            return
+        preset_id = str(combo.currentData() or "").strip()
+        preset_ids = available_preset_ids or {preset.voice_preset_id for preset in self._voice_presets}
+        if not preset_id:
+            self._set_voice_policy_row_status(table, row_index, status_text="Chưa gán", status_kind="unbound")
+            return
+        if preset_id not in preset_ids:
+            self._set_voice_policy_row_status(
+                table,
+                row_index,
+                status_text="Preset đã gán không còn tồn tại",
+                status_kind="missing",
+            )
+            return
+        ok_text = "Đã override theo quan hệ" if table is self._relationship_voice_policy_table else "Đã cấu hình fallback"
+        self._set_voice_policy_row_status(table, row_index, status_text=ok_text, status_kind="ok")
+
+    def _refresh_voice_policy_status_summary(self) -> None:
+        if not self._current_workspace:
+            self._voice_policy_status.setText("Voice policy: chưa mở dự án")
+            return
+        total_rows = self._character_voice_policy_table.rowCount() + self._relationship_voice_policy_table.rowCount()
+        if total_rows == 0:
+            self._voice_policy_status.setText("Voice policy: chưa có nhân vật hoặc quan hệ từ Contextual V2")
+            return
+
+        bound_count = 0
+        missing_count = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                status_item = table.item(row_index, 3)
+                status_kind = str(status_item.data(Qt.ItemDataRole.UserRole) or "") if status_item else ""
+                if status_kind == "ok":
+                    bound_count += 1
+                elif status_kind == "missing":
+                    missing_count += 1
+
+        if bound_count == 0:
+            self._voice_policy_status.setText(
+                f"Voice policy: có {total_rows} hàng policy khả dụng. Nếu chưa lưu policy nào, track sẽ dùng speaker binding rồi mới rơi về preset mặc định."
+            )
+            return
+
+        details = [f"{bound_count}/{total_rows} hàng voice policy đã có preset."]
+        if missing_count:
+            details.append(f"{missing_count} policy đang trỏ tới preset không còn tồn tại.")
+        else:
+            details.append("Các policy đã cấu hình hiện đều hợp lệ.")
+        self._voice_policy_status.setText("Voice policy: " + " ".join(details))
+
+    def _set_voice_policy_form_dirty(self, is_dirty: bool) -> None:
+        self._voice_policy_dirty = is_dirty
+        marker = " Form hiện có thay đổi chưa lưu."
+        status_text = self._voice_policy_status.text().strip()
+        if status_text:
+            if is_dirty and marker not in status_text:
+                self._voice_policy_status.setText(status_text + marker)
+            elif not is_dirty and marker in status_text:
+                self._voice_policy_status.setText(status_text.replace(marker, ""))
+        if is_dirty:
+            self._voice_policy_hint.setText(
+                "Lưu ý: voice policy trên form đang có thay đổi chưa lưu. Runtime chỉ dùng policy đã lưu trong dự án."
+            )
+        else:
+            self._voice_policy_hint.setText(
+                "Mẹo: voice policy là fallback mềm. Quan hệ speaker->listener sẽ ưu tiên hơn policy theo nhân vật, nhưng speaker binding vẫn là mức ưu tiên cao nhất."
+            )
+        self._sync_voice_summary_with_binding_form_state()
+
+    def _handle_voice_policy_selection_changed(self, table: QTableWidget, row_index: int) -> None:
+        if self._voice_policy_loading:
+            return
+        self._update_voice_policy_row_status(table, row_index)
+        self._refresh_voice_policy_status_summary()
+        self._set_voice_policy_form_dirty(True)
+
+    def _fill_unbound_voice_policies_with_selected_preset(self) -> None:
+        preset_id = str(self._voice_combo.currentData() or "").strip()
+        if not preset_id:
+            QMessageBox.warning(self, "Voice policy", "Hãy chọn preset giọng mặc định trước.")
+            return
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                combo = table.cellWidget(row_index, 2)
+                if not isinstance(combo, QComboBox):
+                    continue
+                if str(combo.currentData() or "").strip():
+                    continue
+                for combo_index in range(combo.count()):
+                    if str(combo.itemData(combo_index) or "").strip() == preset_id:
+                        combo.setCurrentIndex(combo_index)
+                        changed += 1
+                        break
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã gán preset hiện tại cho {changed} hàng voice policy còn trống")
+        else:
+            QMessageBox.information(self, "Voice policy", "Không có hàng policy trống nào để gán nhanh.")
+
+    def _clear_voice_policy_form(self) -> None:
+        changed = False
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                combo = table.cellWidget(row_index, 2)
+                if isinstance(combo, QComboBox):
+                    if combo.currentIndex() != 0:
+                        changed = True
+                    combo.setCurrentIndex(0)
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+
+    def _reload_voice_policies(self) -> None:
+        self._voice_policy_loading = True
+        self._character_voice_policy_table.setRowCount(0)
+        self._relationship_voice_policy_table.setRowCount(0)
+        if not self._current_workspace:
+            self._voice_policy_status.setText("Voice policy: chưa mở dự án")
+            self._voice_policy_loading = False
+            self._set_voice_policy_form_dirty(False)
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        analysis_rows = database.list_segment_analyses(self._current_workspace.project_id)
+        if not analysis_rows:
+            self._voice_policy_status.setText("Voice policy: chưa có dữ liệu Contextual V2")
+            self._voice_policy_loading = False
+            self._set_voice_policy_form_dirty(False)
+            return
+
+        character_name_map = self._character_name_map(database)
+        relationship_rows = database.list_relationship_profiles(self._current_workspace.project_id)
+        voice_policy_rows = database.list_voice_policies(self._current_workspace.project_id)
+        available_preset_ids = {preset.voice_preset_id for preset in self._voice_presets}
+
+        character_policy_map = {
+            str(row["speaker_character_id"] or "").strip(): str(row["voice_preset_id"] or "").strip()
+            for row in voice_policy_rows
+            if str(row["policy_scope"] or "character").strip() == "character"
+            and str(row["speaker_character_id"] or "").strip()
+        }
+        relationship_policy_map = {
+            (
+                str(row["speaker_character_id"] or "").strip(),
+                str(row["listener_character_id"] or "").strip(),
+            ): str(row["voice_preset_id"] or "").strip()
+            for row in voice_policy_rows
+            if str(row["policy_scope"] or "").strip() == "relationship"
+            and str(row["speaker_character_id"] or "").strip()
+            and str(row["listener_character_id"] or "").strip()
+        }
+
+        character_candidates = discover_speaker_candidates(analysis_rows, character_name_map=character_name_map)
+        known_character_keys = {candidate.speaker_key for candidate in character_candidates}
+        for speaker_key in sorted(character_policy_map):
+            if speaker_key in known_character_keys:
+                continue
+            display_name = character_name_map.get(speaker_key, "").strip()
+            label = f"{display_name} ({speaker_key})" if display_name and display_name != speaker_key else speaker_key
+            character_candidates.append(
+                type(character_candidates[0])(
+                    speaker_type="character",
+                    speaker_key=speaker_key,
+                    label=label,
+                    segment_count=0,
+                )
+                if character_candidates
+                else discover_speaker_candidates(
+                    [{"speaker_json": {"character_id": speaker_key}}],
+                    character_name_map=character_name_map,
+                )[0]
+            )
+        character_candidates.sort(key=lambda item: (-item.segment_count, item.label))
+
+        relationship_candidates = discover_relationship_voice_policy_candidates(
+            analysis_rows,
+            relationship_rows=relationship_rows,
+            character_name_map=character_name_map,
+        )
+        known_relationships = {(item.speaker_key, item.listener_key) for item in relationship_candidates}
+        for speaker_key, listener_key in sorted(relationship_policy_map):
+            if (speaker_key, listener_key) in known_relationships:
+                continue
+            speaker_label = character_name_map.get(speaker_key, "").strip()
+            listener_label = character_name_map.get(listener_key, "").strip()
+            relationship_candidates.append(
+                type(relationship_candidates[0])(
+                    speaker_key=speaker_key,
+                    listener_key=listener_key,
+                    label=(
+                        f"{speaker_label} ({speaker_key}) -> {listener_label} ({listener_key})"
+                        if speaker_label and listener_label
+                        else f"{speaker_key} -> {listener_key}"
+                    ),
+                    segment_count=0,
+                )
+                if relationship_candidates
+                else discover_relationship_voice_policy_candidates(
+                    [
+                        {
+                            "speaker_json": {"character_id": speaker_key},
+                            "listeners_json": [{"character_id": listener_key}],
+                        }
+                    ],
+                    character_name_map=character_name_map,
+                )[0]
+            )
+        relationship_candidates.sort(key=lambda item: (-item.segment_count, item.label))
+
+        for row_index, candidate in enumerate(character_candidates):
+            self._character_voice_policy_table.insertRow(row_index)
+            item = QTableWidgetItem(candidate.label)
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                {
+                    "policy_scope": "character",
+                    "speaker_character_id": candidate.speaker_key,
+                    "listener_character_id": "",
+                },
+            )
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._character_voice_policy_table.setItem(row_index, 0, item)
+            count_item = QTableWidgetItem(str(candidate.segment_count))
+            count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._character_voice_policy_table.setItem(row_index, 1, count_item)
+            combo = QComboBox()
+            combo.addItem("Chưa gán", "")
+            for preset in self._voice_presets:
+                combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
+            selected_preset_id = character_policy_map.get(candidate.speaker_key, "")
+            if selected_preset_id:
+                for combo_index in range(combo.count()):
+                    if combo.itemData(combo_index) == selected_preset_id:
+                        combo.setCurrentIndex(combo_index)
+                        break
+            self._character_voice_policy_table.setCellWidget(row_index, 2, combo)
+            combo.currentIndexChanged.connect(
+                lambda _index, row_index=row_index: self._handle_voice_policy_selection_changed(
+                    self._character_voice_policy_table,
+                    row_index,
+                )
+            )
+            self._update_voice_policy_row_status(
+                self._character_voice_policy_table,
+                row_index,
+                available_preset_ids=available_preset_ids,
+            )
+
+        for row_index, candidate in enumerate(relationship_candidates):
+            self._relationship_voice_policy_table.insertRow(row_index)
+            item = QTableWidgetItem(candidate.label)
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                {
+                    "policy_scope": "relationship",
+                    "speaker_character_id": candidate.speaker_key,
+                    "listener_character_id": candidate.listener_key,
+                },
+            )
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._relationship_voice_policy_table.setItem(row_index, 0, item)
+            count_item = QTableWidgetItem(str(candidate.segment_count))
+            count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self._relationship_voice_policy_table.setItem(row_index, 1, count_item)
+            combo = QComboBox()
+            combo.addItem("Chưa gán", "")
+            for preset in self._voice_presets:
+                combo.addItem(f"{preset.name} ({preset.engine})", preset.voice_preset_id)
+            selected_preset_id = relationship_policy_map.get((candidate.speaker_key, candidate.listener_key), "")
+            if selected_preset_id:
+                for combo_index in range(combo.count()):
+                    if combo.itemData(combo_index) == selected_preset_id:
+                        combo.setCurrentIndex(combo_index)
+                        break
+            self._relationship_voice_policy_table.setCellWidget(row_index, 2, combo)
+            combo.currentIndexChanged.connect(
+                lambda _index, row_index=row_index: self._handle_voice_policy_selection_changed(
+                    self._relationship_voice_policy_table,
+                    row_index,
+                )
+            )
+            self._update_voice_policy_row_status(
+                self._relationship_voice_policy_table,
+                row_index,
+                available_preset_ids=available_preset_ids,
+            )
+
+        self._voice_policy_loading = False
+        self._refresh_voice_policy_status_summary()
+        self._set_voice_policy_form_dirty(False)
+
+    def _save_voice_policies(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Voice policy", "Hãy tạo hoặc mở dự án trước.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        now = utc_now_iso()
+        policies: list[VoicePolicyRecord] = []
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in range(table.rowCount()):
+                policy_item = table.item(row_index, 0)
+                combo = table.cellWidget(row_index, 2)
+                if policy_item is None or not isinstance(combo, QComboBox):
+                    continue
+                payload = policy_item.data(Qt.ItemDataRole.UserRole) or {}
+                policy_scope = str(payload.get("policy_scope", "character") or "character").strip() or "character"
+                speaker_character_id = str(payload.get("speaker_character_id", "") or "").strip()
+                listener_character_id = str(payload.get("listener_character_id", "") or "").strip()
+                voice_preset_id = str(combo.currentData() or "").strip()
+                if not speaker_character_id or not voice_preset_id:
+                    continue
+                policy_id = (
+                    f"voicepolicy:relationship:{speaker_character_id}:{listener_character_id}"
+                    if policy_scope == "relationship"
+                    else f"voicepolicy:character:{speaker_character_id}"
+                )
+                policies.append(
+                    VoicePolicyRecord(
+                        policy_id=policy_id,
+                        project_id=self._current_workspace.project_id,
+                        policy_scope=policy_scope,
+                        speaker_character_id=speaker_character_id,
+                        listener_character_id=listener_character_id or None,
+                        voice_preset_id=voice_preset_id,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+        database.replace_voice_policies(self._current_workspace.project_id, policies)
+        self._set_voice_policy_form_dirty(False)
+        self._invalidate_subtitle_pipeline_outputs(clear_tts_audio=True)
+        self._reload_voice_policies()
+        self._refresh_workspace_views()
+        self._append_log_line(f"Đã lưu {len(policies)} voice policy")
+        QMessageBox.information(
+            self,
+            "Voice policy",
+            (
+                f"Đã lưu {len(policies)} voice policy.\n"
+                "- Nếu đã thay đổi policy giọng, hãy chạy lại TTS rồi tạo lại track giọng."
+            ),
+        )
+
     def _resolve_tts_voice_plan(
         self,
         database: ProjectDatabase,
@@ -2900,6 +3337,9 @@ class MainWindow(QMainWindow):
         binding_rows = (
             database.list_speaker_bindings(self._current_workspace.project_id) if self._current_workspace else []
         )
+        voice_policy_rows = (
+            database.list_voice_policies(self._current_workspace.project_id) if self._current_workspace else []
+        )
         analysis_rows = (
             database.list_segment_analyses(self._current_workspace.project_id) if self._current_workspace else []
         )
@@ -2907,19 +3347,20 @@ class MainWindow(QMainWindow):
             subtitle_rows=voice_rows,
             analysis_rows=analysis_rows,
             binding_rows=binding_rows,
+            voice_policy_rows=voice_policy_rows,
             available_preset_ids=set(available_presets),
         )
-        if not plan.active_bindings:
+        if not plan.active_bindings and not getattr(plan, "active_voice_policies", False):
             return default_preset, None, plan.segment_speaker_keys or None, plan
 
         if plan.missing_preset_ids or plan.unresolved_speakers:
             if warn_on_unresolved:
-                lines = ["Speaker binding hiện chưa đầy đủ, chưa thể chạy TTS an toàn."]
+                lines = ["Voice policy/binding hiện chưa đầy đủ, chưa thể chạy TTS an toàn."]
                 if plan.unresolved_speakers:
                     lines.append(f"- Speaker chưa gán preset: {', '.join(plan.unresolved_speakers)}")
                 if plan.missing_preset_ids:
                     lines.append(f"- Preset không còn tồn tại: {', '.join(plan.missing_preset_ids)}")
-                lines.append("- Hãy vào tab Lồng tiếng, hoàn tất bảng gán speaker rồi thử lại.")
+                lines.append("- Hãy vào tab Lồng tiếng, hoàn tất speaker binding/voice policy rồi thử lại.")
                 QMessageBox.warning(self, dialog_title, "\n".join(lines))
             return default_preset, None, plan.segment_speaker_keys or None, plan
 
@@ -4959,6 +5400,7 @@ class MainWindow(QMainWindow):
         database = ProjectDatabase(self._current_workspace.database_path)
         project_row = database.get_project()
         self._reload_speaker_bindings()
+        self._reload_voice_policies()
         video_row = database.get_primary_video_asset(self._current_workspace.project_id)
         if video_row:
             self._media_summary.setText(
@@ -5072,6 +5514,20 @@ class MainWindow(QMainWindow):
                         )
                 else:
                     speaker_binding_lines.append("- Speaker binding: chÆ°a báº­t, toÃ n bá»™ sáº½ dÃ¹ng preset máº·c Ä‘á»‹nh")
+        if database and subtitle_rows and voice_plan is not None:
+            if getattr(voice_plan, "active_voice_policies", False):
+                relationship_hits = int(getattr(voice_plan, "relationship_policy_hits", 0))
+                character_hits = int(getattr(voice_plan, "character_policy_hits", 0))
+                if relationship_hits or character_hits:
+                    speaker_binding_lines.append(
+                        f"- Voice policy: relationship={relationship_hits} dòng, character={character_hits} dòng"
+                    )
+                else:
+                    speaker_binding_lines.append(
+                        "- Voice policy: đã bật nhưng chưa khớp dòng nào; runtime sẽ rơi về speaker binding hoặc preset mặc định"
+                    )
+            else:
+                speaker_binding_lines.append("- Voice policy: chưa bật")
         tts_ready_count = sum(1 for row in subtitle_rows if row["audio_path"])
         total_duration_ms = int(video_row["duration_ms"]) if video_row and video_row["duration_ms"] else (
             max((int(row["end_ms"]) for row in subtitle_rows), default=0)

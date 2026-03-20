@@ -180,6 +180,19 @@ class SpeakerBindingRecord:
 
 
 @dataclass(slots=True)
+class VoicePolicyRecord:
+    policy_id: str
+    project_id: str
+    policy_scope: str
+    speaker_character_id: str
+    listener_character_id: str | None = None
+    voice_preset_id: str = ""
+    notes: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(slots=True)
 class SceneMemoryRecord:
     scene_id: str
     project_id: str

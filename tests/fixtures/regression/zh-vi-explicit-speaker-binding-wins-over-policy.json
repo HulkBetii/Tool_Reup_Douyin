@@ -1,0 +1,57 @@
+{
+  "subtitle_rows": [
+    {
+      "segment_id": "evt-1",
+      "source_segment_id": "seg-1",
+      "tts_text": "Khong doi."
+    }
+  ],
+  "analysis_rows": [
+    {
+      "segment_id": "seg-1",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.98
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "confidence": 0.95
+        }
+      ]
+    }
+  ],
+  "binding_rows": [
+    {
+      "binding_id": "bind:character:char_a",
+      "project_id": "project-1",
+      "speaker_type": "character",
+      "speaker_key": "char_a",
+      "voice_preset_id": "voice-bind"
+    }
+  ],
+  "voice_policy_rows": [
+    {
+      "policy_id": "voicepolicy:character:char_a",
+      "project_id": "project-1",
+      "policy_scope": "character",
+      "speaker_character_id": "char_a",
+      "listener_character_id": "",
+      "voice_preset_id": "voice-a"
+    },
+    {
+      "policy_id": "voicepolicy:relationship:char_a:char_b",
+      "project_id": "project-1",
+      "policy_scope": "relationship",
+      "speaker_character_id": "char_a",
+      "listener_character_id": "char_b",
+      "voice_preset_id": "voice-rel"
+    }
+  ],
+  "available_preset_ids": [
+    "voice-bind",
+    "voice-a",
+    "voice-rel",
+    "default-sapi"
+  ]
+}

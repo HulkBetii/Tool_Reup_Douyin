@@ -24,15 +24,19 @@ def _load_regression_fixture(name: str) -> dict[str, object]:
 
 
 class _FakeDatabase:
-    def __init__(self, *, analyses: list[object], bindings: list[object]) -> None:
+    def __init__(self, *, analyses: list[object], bindings: list[object], voice_policies: list[object] | None = None) -> None:
         self._analyses = analyses
         self._bindings = bindings
+        self._voice_policies = voice_policies or []
 
     def list_segment_analyses(self, _project_id: str | None = None) -> list[object]:
         return list(self._analyses)
 
     def list_speaker_bindings(self, _project_id: str | None = None) -> list[object]:
         return list(self._bindings)
+
+    def list_voice_policies(self, _project_id: str | None = None) -> list[object]:
+        return list(self._voice_policies)
 
 
 def _preset(voice_preset_id: str) -> SimpleNamespace:
@@ -55,7 +59,7 @@ def test_rerun_contextual_downstream_blocks_partial_speaker_binding_config(monke
         bindings=list(fixture["binding_rows"]),
     )
 
-    with pytest.raises(RuntimeError, match="Speaker binding hien chua day du"):
+    with pytest.raises(RuntimeError, match="Voice plan hien chua day du"):
         module._resolve_segment_voice_plan(
             workspace=workspace,
             database=database,
@@ -140,3 +144,103 @@ def test_rerun_contextual_downstream_returns_per_segment_voice_plan_when_binding
         "evt-1": "voice-a",
         "evt-2": "voice-b",
     }
+
+
+def test_rerun_contextual_downstream_uses_character_voice_policy_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-character-voice-policy-fallback.json")
+
+    available_presets = {
+        "voice-a": _preset("voice-a"),
+    }
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: list(available_presets.values()),
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+    )
+
+    segment_voice_presets, segment_speaker_keys, plan = module._resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=list(fixture["subtitle_rows"]),
+        default_preset=_preset("default-sapi"),
+    )
+
+    assert plan.active_voice_policies is True
+    assert plan.character_policy_hits == 1
+    assert segment_speaker_keys == {"evt-1": "char_a", "evt-2": "char_c"}
+    assert segment_voice_presets is not None
+    assert {key: value.voice_preset_id for key, value in segment_voice_presets.items()} == {"evt-1": "voice-a"}
+
+
+def test_rerun_contextual_downstream_relationship_policy_overrides_character_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-relationship-voice-policy-overrides-character.json")
+
+    available_presets = {
+        "voice-a": _preset("voice-a"),
+        "voice-rel": _preset("voice-rel"),
+    }
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: list(available_presets.values()),
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+    )
+
+    segment_voice_presets, _segment_speaker_keys, plan = module._resolve_segment_voice_plan(
+        workspace=workspace,
+        database=database,
+        segments=list(fixture["subtitle_rows"]),
+        default_preset=_preset("default-sapi"),
+    )
+
+    assert plan.active_voice_policies is True
+    assert plan.relationship_policy_hits == 1
+    assert segment_voice_presets is not None
+    assert {key: value.voice_preset_id for key, value in segment_voice_presets.items()} == {"evt-1": "voice-rel"}
+
+
+def test_rerun_contextual_downstream_blocks_when_selected_voice_policy_preset_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    fixture = _load_regression_fixture("zh-vi-voice-policy-missing-preset-blocks.json")
+
+    monkeypatch.setattr(
+        module,
+        "list_voice_presets",
+        lambda _root_dir: [_preset("voice-a")],
+    )
+
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = _FakeDatabase(
+        analyses=list(fixture["analysis_rows"]),
+        bindings=list(fixture["binding_rows"]),
+        voice_policies=list(fixture["voice_policy_rows"]),
+    )
+
+    with pytest.raises(RuntimeError, match="Preset khong con ton tai"):
+        module._resolve_segment_voice_plan(
+            workspace=workspace,
+            database=database,
+            segments=list(fixture["subtitle_rows"]),
+            default_preset=_preset("default-sapi"),
+        )

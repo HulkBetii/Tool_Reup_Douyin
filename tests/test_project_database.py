@@ -12,6 +12,7 @@ from app.project.models import (
     SegmentAnalysisRecord,
     SegmentRecord,
     SpeakerBindingRecord,
+    VoicePolicyRecord,
 )
 from app.translate.relationship_memory import build_locked_relationship_record, relationship_record_from_row
 
@@ -290,6 +291,61 @@ def test_project_database_replaces_and_lists_speaker_bindings(tmp_path: Path) ->
     assert rows[0]["speaker_key"] == "char_a"
     assert rows[0]["voice_preset_id"] == "voice-a"
     assert rows[0]["notes"] == "main narrator"
+
+
+def test_project_database_replaces_and_lists_voice_policies(tmp_path: Path) -> None:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-20T00:00:00+00:00",
+            updated_at="2026-03-20T00:00:00+00:00",
+        )
+    )
+
+    database.replace_voice_policies(
+        "project-1",
+        [
+            VoicePolicyRecord(
+                policy_id="voicepolicy:character:char_a",
+                project_id="project-1",
+                policy_scope="character",
+                speaker_character_id="char_a",
+                voice_preset_id="voice-a",
+                notes="character default",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            ),
+            VoicePolicyRecord(
+                policy_id="voicepolicy:relationship:char_a:char_b",
+                project_id="project-1",
+                policy_scope="relationship",
+                speaker_character_id="char_a",
+                listener_character_id="char_b",
+                voice_preset_id="voice-rel",
+                notes="relation override",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            ),
+        ],
+    )
+
+    rows = database.list_voice_policies("project-1")
+
+    assert [
+        (row["policy_scope"], row["speaker_character_id"], row["listener_character_id"], row["voice_preset_id"])
+        for row in rows
+    ] == [
+        ("character", "char_a", "", "voice-a"),
+        ("relationship", "char_a", "char_b", "voice-rel"),
+    ]
 
 
 def test_project_database_persists_contextual_translation_state(tmp_path: Path) -> None:
