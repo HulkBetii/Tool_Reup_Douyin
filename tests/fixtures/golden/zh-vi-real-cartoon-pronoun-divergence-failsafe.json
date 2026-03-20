@@ -1,0 +1,50 @@
+{
+  "fixture_id": "zh-vi-real-cartoon-pronoun-divergence-failsafe",
+  "class": "real_world_sub_tts_pronoun_divergence",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thật từ sample Video_test_TQ. Subtitle trung tính theo tự xưng, nhưng TTS tự thêm cách gọi người nghe, nên phải bị semantic QC chặn.",
+  "segments": [
+    {
+      "segment_id": "seg-real-0100",
+      "segment_index": 0,
+      "scene_id": "scene_real_0000",
+      "source_text": "为什么还不给我掌工资啊",
+      "speaker_json": {
+        "character_id": "Character A",
+        "confidence": 0.95
+      },
+      "listeners_json": [
+        {
+          "character_id": "Character B",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "unknown",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "locked": false,
+        "confidence": 0.7
+      },
+      "confidence_json": {
+        "overall": 0.9,
+        "speaker": 0.95,
+        "listener": 0.9,
+        "register": 0.9,
+        "relation": 0.7,
+        "translation": 0.95
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.8
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Sao vẫn chưa trả lương cho tôi vậy?",
+      "approved_tts_text": "Sao bạn chưa chịu trả lương cho tôi thế?"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "fixture_id": "zh-vi-real-single-word-low-confidence-failsafe",
+  "class": "real_world_low_confidence_single_turn",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thật từ sample Video_test_TQ. Một câu đơn `好` với ngữ cảnh quá ít phải đi review thay vì được coi là an toàn.",
+  "segments": [
+    {
+      "segment_id": "seg-real-0200",
+      "segment_index": 9,
+      "scene_id": "scene_real_0002",
+      "source_text": "好",
+      "speaker_json": {
+        "character_id": "unknown",
+        "confidence": 0.5
+      },
+      "listeners_json": [],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": false,
+        "confidence": 0.5
+      },
+      "confidence_json": {
+        "overall": 0.5,
+        "speaker": 0.5,
+        "listener": 0.5,
+        "register": 0.6,
+        "relation": 0.5,
+        "translation": 0.5
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.4
+      },
+      "risk_flags_json": [
+        "insufficient_context"
+      ],
+      "approved_subtitle_text": "Được",
+      "approved_tts_text": "Được rồi"
+    }
+  ]
+}

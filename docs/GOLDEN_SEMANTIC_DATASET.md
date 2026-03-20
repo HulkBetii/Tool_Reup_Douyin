@@ -53,3 +53,5 @@ Initial dataset covers:
 - neutral narration
 - locked relation allowed alternates
 - side-specific alternate contract
+- reviewed real-world dialogue from `Video_test_TQ`
+- real-world fail-safe cases for pronoun divergence and low-confidence single-turn ambiguity

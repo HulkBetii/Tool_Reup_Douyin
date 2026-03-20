@@ -1,0 +1,88 @@
+{
+  "fixture_id": "zh-vi-real-cartoon-dialogue-safe",
+  "class": "real_world_dialogue_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thật từ sample Video_test_TQ sau review. Đối thoại hoạt hình giữ xưng hô nhất quán `tôi/bạn`, subtitle và TTS đều an toàn.",
+  "segments": [
+    {
+      "segment_id": "seg-real-0001",
+      "segment_index": 1,
+      "scene_id": "scene_real_0000",
+      "source_text": "你连字上考核都通不过掌什么工资啊",
+      "speaker_json": {
+        "character_id": "Character B",
+        "confidence": 0.95
+      },
+      "listeners_json": [
+        {
+          "character_id": "Character A",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "unknown",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "locked": false,
+        "confidence": 0.7
+      },
+      "confidence_json": {
+        "overall": 0.9,
+        "speaker": 0.95,
+        "listener": 0.9,
+        "register": 0.9,
+        "relation": 0.7,
+        "translation": 0.95
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.8
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Bạn còn chưa qua được bài kiểm tra thì sao có lương?",
+      "approved_tts_text": "Bạn chưa qua nổi bài kiểm tra, lấy gì mà có lương chứ?"
+    },
+    {
+      "segment_id": "seg-real-0002",
+      "segment_index": 2,
+      "scene_id": "scene_real_0000",
+      "source_text": "我哪有通不过",
+      "speaker_json": {
+        "character_id": "Character A",
+        "confidence": 0.9
+      },
+      "listeners_json": [
+        {
+          "character_id": "Character B",
+          "role": "listener",
+          "confidence": 0.85
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "unknown",
+        "self_term": "tôi",
+        "address_term": "bạn",
+        "locked": false,
+        "confidence": 0.7
+      },
+      "confidence_json": {
+        "overall": 0.85,
+        "speaker": 0.9,
+        "listener": 0.85,
+        "register": 0.85,
+        "relation": 0.7,
+        "translation": 0.9
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.8
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Tôi có đâu mà không qua được!",
+      "approved_tts_text": "Tôi mà không qua được á? Không đời nào!"
+    }
+  ]
+}

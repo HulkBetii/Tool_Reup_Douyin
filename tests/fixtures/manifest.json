@@ -19,6 +19,39 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-real-cartoon-dialogue-safe",
+      "class": "real_world_dialogue_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-real-cartoon-dialogue-safe.json",
+      "notes": "Case thật từ Video_test_TQ đã qua review, subtitle/TTS tự nhiên hơn nhưng vẫn giữ an toàn semantic."
+    },
+    {
+      "fixture_id": "zh-vi-real-cartoon-pronoun-divergence-failsafe",
+      "class": "real_world_sub_tts_pronoun_divergence",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-real-cartoon-pronoun-divergence-failsafe.json",
+      "notes": "Case thật từ Video_test_TQ nơi TTS tự thêm cách gọi người nghe làm lệch policy so với subtitle; phải bị semantic QC chặn."
+    },
+    {
+      "fixture_id": "zh-vi-real-single-word-low-confidence-failsafe",
+      "class": "real_world_low_confidence_single_turn",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-real-single-word-low-confidence-failsafe.json",
+      "notes": "Case thật từ Video_test_TQ với câu đơn quá ngắn và thiếu context; intended behavior là fail-safe sang review."
+    },
+    {
       "fixture_id": "zh-vi-family-elder-sibling-consistent-safe",
       "class": "consistent_honorific_policy",
       "languages": [
