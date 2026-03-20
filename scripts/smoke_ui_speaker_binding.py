@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QSize
+from PySide6.QtCore import QItemSelectionModel, QSize
 from PySide6.QtWidgets import QApplication
 
 from app.core.jobs import JobManager
@@ -49,6 +49,20 @@ def _save_window_snapshot(window: MainWindow, path: Path) -> None:
 def _save_widget_snapshot(widget, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     widget.grab().save(str(path))
+
+
+def _select_rows(table, row_indexes: list[int]) -> None:
+    selection_model = table.selectionModel()
+    if selection_model is None:
+        return
+    table.clearSelection()
+    for row_index in row_indexes:
+        selection_model.select(
+            table.model().index(row_index, 0),
+            QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+        )
+    if row_indexes:
+        table.setCurrentCell(row_indexes[0], 0)
 
 
 def main() -> int:
@@ -95,6 +109,44 @@ def main() -> int:
     }
 
     _select_voice_preset(window, args.voice_preset_id)
+    table = window._speaker_binding_table  # type: ignore[attr-defined]
+    selected_rows = list(range(min(2, table.rowCount())))
+    _select_rows(table, selected_rows)
+    window._fill_selected_speaker_bindings_with_selected_preset()  # type: ignore[attr-defined]
+    app.processEvents()
+
+    selected_fill_snapshot = output_dir / "speaker_binding_selected_fill.png"
+    _save_window_snapshot(window, selected_fill_snapshot)
+    selected_fill_table_snapshot = output_dir / "speaker_binding_table_selected_fill.png"
+    _save_widget_snapshot(table, selected_fill_table_snapshot)
+    selected_fill_status_snapshot = output_dir / "speaker_binding_status_selected_fill.png"
+    _save_widget_snapshot(window._speaker_binding_status, selected_fill_status_snapshot)  # type: ignore[attr-defined]
+
+    selected_fill_summary = {
+        "status_text": window._speaker_binding_status.text(),  # type: ignore[attr-defined]
+        "voice_summary": window._voice_summary.text(),  # type: ignore[attr-defined]
+        "rows": _speaker_binding_table_rows(window),
+        "selected_rows": selected_rows,
+    }
+
+    _select_rows(table, selected_rows)
+    window._clear_selected_speaker_bindings()  # type: ignore[attr-defined]
+    app.processEvents()
+
+    selected_clear_snapshot = output_dir / "speaker_binding_selected_clear.png"
+    _save_window_snapshot(window, selected_clear_snapshot)
+    selected_clear_table_snapshot = output_dir / "speaker_binding_table_selected_clear.png"
+    _save_widget_snapshot(table, selected_clear_table_snapshot)
+    selected_clear_status_snapshot = output_dir / "speaker_binding_status_selected_clear.png"
+    _save_widget_snapshot(window._speaker_binding_status, selected_clear_status_snapshot)  # type: ignore[attr-defined]
+
+    selected_clear_summary = {
+        "status_text": window._speaker_binding_status.text(),  # type: ignore[attr-defined]
+        "voice_summary": window._voice_summary.text(),  # type: ignore[attr-defined]
+        "rows": _speaker_binding_table_rows(window),
+        "selected_rows": selected_rows,
+    }
+
     window._fill_unbound_speakers_with_selected_preset()  # type: ignore[attr-defined]
     app.processEvents()
 
@@ -123,7 +175,15 @@ def main() -> int:
                 "filled_snapshot": str(filled_snapshot),
                 "filled_table_snapshot": str(filled_table_snapshot),
                 "filled_status_snapshot": str(filled_status_snapshot),
+                "selected_fill_snapshot": str(selected_fill_snapshot),
+                "selected_fill_table_snapshot": str(selected_fill_table_snapshot),
+                "selected_fill_status_snapshot": str(selected_fill_status_snapshot),
+                "selected_clear_snapshot": str(selected_clear_snapshot),
+                "selected_clear_table_snapshot": str(selected_clear_table_snapshot),
+                "selected_clear_status_snapshot": str(selected_clear_status_snapshot),
                 "initial": initial_summary,
+                "selected_fill": selected_fill_summary,
+                "selected_clear": selected_clear_summary,
                 "filled": filled_summary,
             },
             ensure_ascii=False,

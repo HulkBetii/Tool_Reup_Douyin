@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QSignalBlocker, QTimer, Qt
+from PySide6.QtCore import QItemSelectionModel, QSignalBlocker, QTimer, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -108,6 +108,7 @@ from app.translate.persistence import (
     persist_translations,
 )
 from app.translate.presets import ensure_prompt_templates, list_prompt_templates
+from app.translate.review_resolution import apply_review_resolution, resolve_review_target_segment_ids
 from app.ui.status_panel import StatusPanel
 from app.version import APP_NAME, APP_VERSION
 
@@ -366,6 +367,7 @@ class MainWindow(QMainWindow):
             ["#", "Scene", "Nguồn", "Speaker", "Listener", "Xưng hô", "Lý do"]
         )
         self._review_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._review_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._review_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._review_table.setAlternatingRowColors(True)
         self._review_table.setWordWrap(True)
@@ -410,10 +412,19 @@ class MainWindow(QMainWindow):
         approve_relation_button.clicked.connect(
             lambda checked=False: self._apply_review_resolution("project-relationship")
         )
+        select_scene_button = QPushButton("Chọn cùng scene")
+        select_scene_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("scene"))
+        select_relation_button = QPushButton("Chọn cùng quan hệ")
+        select_relation_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("relation"))
+        approve_selected_button = QPushButton("Áp cho dòng chọn")
+        approve_selected_button.clicked.connect(self._apply_review_resolution_to_selected_rows)
         review_button_row.addWidget(reload_review_button)
         review_button_row.addWidget(approve_line_button)
         review_button_row.addWidget(approve_scene_button)
         review_button_row.addWidget(approve_relation_button)
+        review_button_row.addWidget(select_scene_button)
+        review_button_row.addWidget(select_relation_button)
+        review_button_row.addWidget(approve_selected_button)
         review_button_row.addStretch(1)
         review_layout.addLayout(review_button_row)
 
@@ -638,6 +649,7 @@ class MainWindow(QMainWindow):
         self._speaker_binding_table.setHorizontalHeaderLabels(["Speaker", "Số dòng", "Preset giọng", "Trạng thái"])
         self._speaker_binding_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._speaker_binding_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._speaker_binding_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._speaker_binding_table.setAlternatingRowColors(True)
         self._speaker_binding_table.verticalHeader().setVisible(False)
         self._speaker_binding_table.setMinimumHeight(180)
@@ -652,6 +664,7 @@ class MainWindow(QMainWindow):
         )
         self._character_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._character_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._character_voice_policy_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._character_voice_policy_table.setAlternatingRowColors(True)
         self._character_voice_policy_table.verticalHeader().setVisible(False)
         self._character_voice_policy_table.setMinimumHeight(140)
@@ -666,6 +679,7 @@ class MainWindow(QMainWindow):
         )
         self._relationship_voice_policy_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._relationship_voice_policy_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._relationship_voice_policy_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self._relationship_voice_policy_table.setAlternatingRowColors(True)
         self._relationship_voice_policy_table.verticalHeader().setVisible(False)
         self._relationship_voice_policy_table.setMinimumHeight(140)
@@ -701,6 +715,12 @@ class MainWindow(QMainWindow):
         self._fill_speaker_bindings_button.clicked.connect(self._fill_unbound_speakers_with_selected_preset)
         self._clear_speaker_bindings_button = QPushButton("Xóa gán trên form")
         self._clear_speaker_bindings_button.clicked.connect(self._clear_speaker_binding_form)
+        self._fill_selected_speaker_bindings_button = QPushButton("Gan preset cho dong chon")
+        self._fill_selected_speaker_bindings_button.clicked.connect(
+            self._fill_selected_speaker_bindings_with_selected_preset
+        )
+        self._clear_selected_speaker_bindings_button = QPushButton("Xoa dong chon")
+        self._clear_selected_speaker_bindings_button.clicked.connect(self._clear_selected_speaker_bindings)
         self._reload_voice_policies_button = QPushButton("Nạp voice policy")
         self._reload_voice_policies_button.clicked.connect(self._reload_voice_policies)
         self._save_voice_policies_button = QPushButton("Lưu voice policy")
@@ -709,6 +729,12 @@ class MainWindow(QMainWindow):
         self._fill_voice_policies_button.clicked.connect(self._fill_unbound_voice_policies_with_selected_preset)
         self._clear_voice_policies_button = QPushButton("Xóa policy trên form")
         self._clear_voice_policies_button.clicked.connect(self._clear_voice_policy_form)
+        self._fill_selected_voice_policies_button = QPushButton("Gan preset cho dong chon")
+        self._fill_selected_voice_policies_button.clicked.connect(
+            self._fill_selected_voice_policy_rows_with_selected_preset
+        )
+        self._clear_selected_voice_policies_button = QPushButton("Xoa dong chon")
+        self._clear_selected_voice_policies_button.clicked.connect(self._clear_selected_voice_policy_rows)
         choose_bgm_button = QPushButton("Chọn BGM")
         choose_bgm_button.clicked.connect(self._choose_bgm_file)
         mix_button = QPushButton("Trộn âm thanh")
@@ -739,20 +765,34 @@ class MainWindow(QMainWindow):
         profile_action_container = QWidget()
         profile_action_container.setLayout(profile_action_row)
 
-        speaker_binding_actions = QHBoxLayout()
-        speaker_binding_actions.addWidget(self._reload_speaker_bindings_button)
-        speaker_binding_actions.addWidget(self._save_speaker_bindings_button)
-        speaker_binding_actions.addWidget(self._fill_speaker_bindings_button)
-        speaker_binding_actions.addWidget(self._clear_speaker_bindings_button)
-        speaker_binding_actions.addStretch(1)
+        speaker_binding_actions_top = QHBoxLayout()
+        speaker_binding_actions_top.addWidget(self._reload_speaker_bindings_button)
+        speaker_binding_actions_top.addWidget(self._save_speaker_bindings_button)
+        speaker_binding_actions_top.addWidget(self._fill_speaker_bindings_button)
+        speaker_binding_actions_top.addWidget(self._clear_speaker_bindings_button)
+        speaker_binding_actions_top.addStretch(1)
+        speaker_binding_actions_bottom = QHBoxLayout()
+        speaker_binding_actions_bottom.addWidget(self._fill_selected_speaker_bindings_button)
+        speaker_binding_actions_bottom.addWidget(self._clear_selected_speaker_bindings_button)
+        speaker_binding_actions_bottom.addStretch(1)
+        speaker_binding_actions = QVBoxLayout()
+        speaker_binding_actions.addLayout(speaker_binding_actions_top)
+        speaker_binding_actions.addLayout(speaker_binding_actions_bottom)
         speaker_binding_actions_container = QWidget()
         speaker_binding_actions_container.setLayout(speaker_binding_actions)
-        voice_policy_actions = QHBoxLayout()
-        voice_policy_actions.addWidget(self._reload_voice_policies_button)
-        voice_policy_actions.addWidget(self._save_voice_policies_button)
-        voice_policy_actions.addWidget(self._fill_voice_policies_button)
-        voice_policy_actions.addWidget(self._clear_voice_policies_button)
-        voice_policy_actions.addStretch(1)
+        voice_policy_actions_top = QHBoxLayout()
+        voice_policy_actions_top.addWidget(self._reload_voice_policies_button)
+        voice_policy_actions_top.addWidget(self._save_voice_policies_button)
+        voice_policy_actions_top.addWidget(self._fill_voice_policies_button)
+        voice_policy_actions_top.addWidget(self._clear_voice_policies_button)
+        voice_policy_actions_top.addStretch(1)
+        voice_policy_actions_bottom = QHBoxLayout()
+        voice_policy_actions_bottom.addWidget(self._fill_selected_voice_policies_button)
+        voice_policy_actions_bottom.addWidget(self._clear_selected_voice_policies_button)
+        voice_policy_actions_bottom.addStretch(1)
+        voice_policy_actions = QVBoxLayout()
+        voice_policy_actions.addLayout(voice_policy_actions_top)
+        voice_policy_actions.addLayout(voice_policy_actions_bottom)
         voice_policy_actions_container = QWidget()
         voice_policy_actions_container.setLayout(voice_policy_actions)
 
@@ -2818,6 +2858,51 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.information(self, "Speaker binding", "Không có speaker trống nào để gán nhanh.")
 
+    def _fill_selected_speaker_bindings_with_selected_preset(self) -> None:
+        preset_id = str(self._voice_combo.currentData() or "").strip()
+        if not preset_id:
+            QMessageBox.warning(self, "Speaker binding", "Hãy chọn preset giọng mặc định trước.")
+            return
+        selected_rows = self._selected_table_row_indexes(self._speaker_binding_table)
+        if not selected_rows:
+            QMessageBox.warning(self, "Speaker binding", "Hãy chọn ít nhất một dòng speaker trước.")
+            return
+        changed = 0
+        for row_index in selected_rows:
+            combo = self._speaker_binding_table.cellWidget(row_index, 2)
+            if not isinstance(combo, QComboBox):
+                continue
+            for combo_index in range(combo.count()):
+                if str(combo.itemData(combo_index) or "").strip() == preset_id:
+                    if combo.currentIndex() != combo_index:
+                        combo.setCurrentIndex(combo_index)
+                        changed += 1
+                    break
+        self._refresh_speaker_binding_status_summary()
+        if changed:
+            self._set_speaker_binding_form_dirty(True)
+            self._append_log_line(f"Đã gán preset hiện tại cho {changed}/{len(selected_rows)} speaker được chọn")
+        else:
+            QMessageBox.information(self, "Speaker binding", "Các speaker đã chọn đã dùng preset này hoặc không đổi được.")
+
+    def _clear_selected_speaker_bindings(self) -> None:
+        selected_rows = self._selected_table_row_indexes(self._speaker_binding_table)
+        if not selected_rows:
+            QMessageBox.warning(self, "Speaker binding", "Hãy chọn ít nhất một dòng speaker trước.")
+            return
+        changed = 0
+        for row_index in selected_rows:
+            combo = self._speaker_binding_table.cellWidget(row_index, 2)
+            if isinstance(combo, QComboBox) and combo.currentIndex() != 0:
+                combo.setCurrentIndex(0)
+                changed += 1
+        self._refresh_speaker_binding_status_summary()
+        if changed:
+            self._set_speaker_binding_form_dirty(True)
+            self._append_log_line(f"Đã xóa preset trên {changed}/{len(selected_rows)} speaker được chọn")
+        else:
+            QMessageBox.information(self, "Speaker binding", "Các speaker đã chọn hiện đang để trống.")
+
     def _clear_speaker_binding_form(self) -> None:
         changed = False
         for row_index in range(self._speaker_binding_table.rowCount()):
@@ -3068,6 +3153,58 @@ class MainWindow(QMainWindow):
             self._append_log_line(f"Đã gán preset hiện tại cho {changed} hàng voice policy còn trống")
         else:
             QMessageBox.information(self, "Voice policy", "Không có hàng policy trống nào để gán nhanh.")
+
+    def _selected_table_row_indexes(self, table: QTableWidget) -> list[int]:
+        return sorted({index.row() for index in table.selectionModel().selectedRows()})
+
+    def _fill_selected_voice_policy_rows_with_selected_preset(self) -> None:
+        preset_id = str(self._voice_combo.currentData() or "").strip()
+        if not preset_id:
+            QMessageBox.warning(self, "Voice policy", "Hãy chọn preset giọng mặc định trước.")
+            return
+        selected_count = 0
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in self._selected_table_row_indexes(table):
+                selected_count += 1
+                combo = table.cellWidget(row_index, 2)
+                if not isinstance(combo, QComboBox):
+                    continue
+                for combo_index in range(combo.count()):
+                    if str(combo.itemData(combo_index) or "").strip() == preset_id:
+                        if combo.currentIndex() != combo_index:
+                            combo.setCurrentIndex(combo_index)
+                            changed += 1
+                        break
+        if selected_count == 0:
+            QMessageBox.warning(self, "Voice policy", "Hãy chọn ít nhất một dòng policy trước.")
+            return
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã gán preset hiện tại cho {changed}/{selected_count} dòng voice policy được chọn")
+        else:
+            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn đã dùng preset này hoặc không đổi được.")
+
+    def _clear_selected_voice_policy_rows(self) -> None:
+        selected_count = 0
+        changed = 0
+        for table in (self._character_voice_policy_table, self._relationship_voice_policy_table):
+            for row_index in self._selected_table_row_indexes(table):
+                selected_count += 1
+                combo = table.cellWidget(row_index, 2)
+                if isinstance(combo, QComboBox) and combo.currentIndex() != 0:
+                    combo.setCurrentIndex(0)
+                    changed += 1
+        if selected_count == 0:
+            QMessageBox.warning(self, "Voice policy", "Hãy chọn ít nhất một dòng policy trước.")
+            return
+        self._refresh_voice_policy_status_summary()
+        if changed:
+            self._set_voice_policy_form_dirty(True)
+            self._append_log_line(f"Đã xóa preset trên {changed}/{selected_count} dòng voice policy được chọn")
+        else:
+            QMessageBox.information(self, "Voice policy", "Các dòng đã chọn hiện đang để trống.")
 
     def _clear_voice_policy_form(self) -> None:
         changed = False
@@ -4351,7 +4488,114 @@ class MainWindow(QMainWindow):
         )
         return False
 
+    def _selected_review_segment_ids(self) -> list[str]:
+        segment_ids: list[str] = []
+        selection_model = self._review_table.selectionModel()
+        if selection_model is None:
+            return segment_ids
+        for index in selection_model.selectedRows():
+            item = self._review_table.item(index.row(), 0)
+            if item is None:
+                continue
+            segment_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            if segment_id:
+                segment_ids.append(segment_id)
+        return segment_ids
+
+    def _select_review_rows_by_scope(self, scope: str) -> None:
+        if not self._current_workspace:
+            return
+        segment_id = self._pending_review_segment_id
+        if not segment_id:
+            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        try:
+            target_ids = resolve_review_target_segment_ids(
+                database,
+                project_id=self._current_workspace.project_id,
+                segment_id=segment_id,
+                scope="project-relationship" if scope == "relation" else scope,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Review", str(exc))
+            return
+        if not target_ids:
+            QMessageBox.information(self, "Review", "Không tìm thấy dòng nào phù hợp để chọn.")
+            return
+        target_set = set(target_ids)
+        selection_model = self._review_table.selectionModel()
+        if selection_model is None:
+            return
+        first_row = -1
+        with QSignalBlocker(self._review_table):
+            self._review_table.clearSelection()
+            for row_index in range(self._review_table.rowCount()):
+                item = self._review_table.item(row_index, 0)
+                if item is None:
+                    continue
+                row_segment_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+                if row_segment_id not in target_set:
+                    continue
+                if first_row < 0:
+                    first_row = row_index
+                selection_model.select(
+                    self._review_table.model().index(row_index, 0),
+                    QItemSelectionModel.SelectionFlag.Select | QItemSelectionModel.SelectionFlag.Rows,
+                )
+            if first_row >= 0:
+                selection_model.setCurrentIndex(
+                    self._review_table.model().index(first_row, 0),
+                    QItemSelectionModel.SelectionFlag.NoUpdate,
+                )
+        self._handle_review_selection_changed()
+
+    def _apply_review_resolution_to_selected_rows(self) -> None:
+        selected_segment_ids = self._selected_review_segment_ids()
+        if not selected_segment_ids:
+            QMessageBox.warning(self, "Review", "Hãy chọn ít nhất một dòng review trước.")
+            return
+        self._run_review_resolution(scope="line", explicit_segment_ids=selected_segment_ids)
+
+    def _run_review_resolution(self, *, scope: str, explicit_segment_ids: list[str] | None = None) -> None:
+        if not self._current_workspace:
+            return
+        segment_id = self._pending_review_segment_id
+        if not segment_id:
+            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        project_row = database.get_project()
+        if project_row is None:
+            return
+        try:
+            updated_count = apply_review_resolution(
+                database,
+                project_id=self._current_workspace.project_id,
+                segment_id=segment_id,
+                speaker_id=self._review_speaker_input.text().strip() or "unknown",
+                listener_id=self._review_listener_input.text().strip() or "unknown",
+                self_term=self._review_self_term_input.text().strip(),
+                address_term=self._review_address_term_input.text().strip(),
+                subtitle_text=self._review_subtitle_input.text().strip(),
+                tts_text=self._review_tts_input.text().strip(),
+                scope=scope,
+                target_language=str(project_row["target_language"] or "vi"),
+                updated_at=utc_now_iso(),
+                explicit_segment_ids=explicit_segment_ids,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Review", str(exc))
+            return
+        self._reload_subtitle_editor_from_db(force=True)
+        self._reload_review_queue()
+        self._refresh_workspace_views()
+        resolution_label = "dong chon" if explicit_segment_ids else scope
+        self._append_log_line(f"Da ap review resolution cho {updated_count} dong ({resolution_label})")
+
     def _apply_review_resolution(self, scope: str) -> None:
+        self._run_review_resolution(scope=scope)
+        return
         if not self._current_workspace:
             return
         segment_id = self._pending_review_segment_id
