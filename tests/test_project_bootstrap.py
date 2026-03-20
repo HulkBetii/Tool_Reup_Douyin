@@ -24,6 +24,8 @@ def test_bootstrap_project_creates_layout_and_database(tmp_path: Path) -> None:
     assert workspace.root_dir.exists()
     assert workspace.database_path.exists()
     assert workspace.project_json_path.exists()
+    assert (workspace.root_dir / ".ops" / "backups").exists()
+    assert (workspace.root_dir / ".ops" / "reports").exists()
     assert (workspace.root_dir / "cache" / "asr").exists()
     assert (workspace.root_dir / "assets" / "voices").exists()
     assert (workspace.root_dir / "presets" / "prompts" / "default-vi-style.json").exists()

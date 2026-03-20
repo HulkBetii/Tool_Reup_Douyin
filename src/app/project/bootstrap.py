@@ -13,9 +13,12 @@ from app.project.models import (
     ProjectRecord,
     ProjectWorkspace,
 )
+from app.ops.project_safety import ensure_ops_layout
 from app.translate.presets import default_translation_mode_for_languages, ensure_prompt_templates
 
 PROJECT_DIRS = (
+    ".ops/backups",
+    ".ops/reports",
     "assets",
     "assets/bgm",
     "assets/logos",
@@ -230,6 +233,7 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
 
     for relative_dir in PROJECT_DIRS:
         (root_dir / relative_dir).mkdir(parents=True, exist_ok=True)
+    ensure_ops_layout(root_dir)
 
     project_id = str(uuid4())
     now = utc_now_iso()
@@ -304,6 +308,7 @@ def open_project(root_dir: Path) -> ProjectWorkspace:
     payload = json.loads(project_json_path.read_text(encoding="utf-8"))
     database = ProjectDatabase(database_path)
     database.initialize()
+    ensure_ops_layout(resolved_root)
     ensure_prompt_templates(
         resolved_root,
         str(payload.get("source_language", "auto")),

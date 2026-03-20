@@ -33,6 +33,14 @@ This is a practical working map for regression-first debugging.
     - [src/app/project/models.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\models.py)
     - [src/app/project/runtime_state.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\runtime_state.py)
 
+- ops
+  - environment doctor, workspace backup/repair, cache inventory/cleanup, bundle smoke helpers
+  - key files:
+    - [src/app/ops/doctor.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\doctor.py)
+    - [src/app/ops/project_safety.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\project_safety.py)
+    - [src/app/ops/cache_ops.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\cache_ops.py)
+    - [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
+
 - media
   - ffprobe and audio extraction cache
   - key files:
@@ -119,6 +127,7 @@ Important distinction:
 10. TTS uses subtitle rows / `tts_text`
 11. voice track + mixdown produce audio artifacts
 12. export uses active subtitle track + optional mixed audio
+13. ops layer can preflight/block, backup, repair stale metadata, and prune orphan cache without changing semantic content
 
 ## Best hook points for durable bugfixes
 
@@ -239,6 +248,28 @@ Current contract:
   - `needs_human_review=true` or weak speaker/relation evidence => skip register-aware style
   - missing register style policy is safe and falls back to the higher layers above
 - changing effective per-segment style must invalidate TTS cache the same way changing preset does
+
+### Release hardening / ops
+
+- doctor and preflight:
+  - [src/app/ops/doctor.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\doctor.py)
+  - [src/app/main.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\main.py) (`--doctor-report`)
+  - [src/app/ui/main_window.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ui\main_window.py)
+- project safety:
+  - [src/app/ops/project_safety.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\project_safety.py)
+  - workspace-local `.ops/backups`
+- cache hygiene:
+  - [src/app/ops/cache_ops.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\cache_ops.py)
+- release smoke:
+  - [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
+  - [docs/RELEASE_CHECKLIST.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\RELEASE_CHECKLIST.md)
+
+Current contract:
+- ops data lives under `workspace/.ops/`
+- doctor only blocks stages that actually depend on the missing tool/key
+- backup happens before high-value reruns, not before every tiny edit
+- repair only clears stale artifact references; it does not rewrite semantic text
+- cache cleanup keeps artifacts still referenced by `runtime_state` or `job_runs`
 
 ## Current weak spots for regression-oriented development
 

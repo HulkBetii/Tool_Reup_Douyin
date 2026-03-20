@@ -10,6 +10,11 @@ This file tracks current limitations so future bugfixes do not confuse "not impl
 4. Golden semantic datasets da co semantic-QC manifest va review-gate manifest, nhung do phu van mong so voi cac edge case thuc te.
 5. Some real-world sample resolution/polish scripts live under [scripts](C:\Users\HulkBeoti\Documents\Reup_Video\scripts) and are useful for exploration, but they are not a substitute for fixture-driven regression tests.
 6. Register-aware voice style da co layer rieng cho `speed/volume/pitch`, nhung chua co emotion modeling sau hon, auto voice casting, hoac policy semantic tinh vi hon theo actor/persona.
+7. Release hardening hien moi o muc local Windows personal-use:
+   - doctor/preflight co the block dung stage
+   - workspace backup/repair/cache ops da co
+   - nhung chua co transactional rollback day du hay auto dependency installer
+8. Packaging smoke da co headless doctor mode va checklist, nhung van can manual validation tren bundle/installer truoc khi ship cho nguoi khac.
 
 ## Important distinction
 

@@ -69,6 +69,7 @@ src/app/
   subtitle/     # subtitle editor helpers, QC, preview, export
   tts/          # TTS engines, voice presets, speaker binding, voice policy
   audio/        # voice track + mixdown
+  ops/          # doctor, backup/repair, cache ops
   ui/           # main window, tabs, status panel
 tests/          # unit + integration + regression fixtures
 docs/           # roadmap / notes
@@ -123,6 +124,8 @@ Ghi chu packaging:
 - Trong bundle, app tu dong auto-detect dependency duoc dong kem tai `dependencies\ffmpeg`, `dependencies\mpv`, `dependencies\espeak-ng`.
 - Neu muon override, co the truyen `-FfmpegBinDir`, `-MpvDllPath`, `-EspeakRoot` cho `build_pyinstaller.ps1`.
 - `build_installer.ps1` can `ISCC.exe` cua Inno Setup 6; neu khong nam o vi tri mac dinh, truyen them `-IsccPath`.
+- Smoke bundle nhanh:
+  - `powershell -ExecutionPolicy Bypass -File .\scripts\smoke_release_bundle.ps1`
 
 ## Trang thai
 
@@ -140,6 +143,12 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
 - voice style/prosody policy theo nhan vat/quan he (`speed/volume/pitch`) tren nen voice policy
 - register-aware voice style policy theo `register/tone/turn-function/relation_type`
 - effective voice plan preview + `Rerun downstream only` tren tab `Long tieng`
+- release hardening + ops:
+  - environment doctor / preflight gate theo stage
+  - workspace `.ops/backups` truoc translation/review/downstream rerun lon
+  - workspace repair + stale artifact reference cleanup
+  - cache inventory / orphan cleanup giu lai artifact dang duoc tham chieu
+  - headless `--doctor-report` mode + bundle smoke script
 - regression harness cho semantic bugs:
   - fixture manifest
   - regression/golden fixtures
@@ -148,6 +157,7 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
   - review reason codes
   - AI bugfix workflow docs
 - packaging/CI co ban cho may Windows local
+- release checklist: [docs/RELEASE_CHECKLIST.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\RELEASE_CHECKLIST.md)
 
 De preview mpv tren Windows, co the cau hinh `mpv_dll_path` trong tab `Cai dat` hoac dong kem `dependencies\mpv\mpv-2.dll` trong bundle.
 Khi dang mo `Preview tu dau` hoac `Preview dong chon`, editor se tu dong export `live_preview.ass` theo debounce va reload vao mpv, nen sua subtitle se thay doi nhanh hon ma khong can mo lai preview moi lan.
@@ -164,5 +174,5 @@ Huong tiep theo hop ly:
 
 - mo rong golden semantic dataset tu cac bug that da gap
 - them regression test truc tiep cho cac helper/script downstream quan trong
-- polish tiep review/TTS UX cho cac case project dai hon
+- release hardening them cho may sach / packaging validation rong hon neu muon ship cho nguoi khac
 - can nhac voice casting / emotion modeling sau khi dataset thuc te day hon

@@ -49,6 +49,9 @@ from app.exporting.presets import (
 from app.media.extract_audio import extract_audio_artifacts, load_cached_audio_artifacts
 from app.media.ffprobe_service import attach_source_video_to_project, probe_media
 from app.media.models import ExtractedAudioArtifacts, MediaMetadata
+from app.ops.cache_ops import build_cache_inventory, cleanup_cache
+from app.ops.doctor import format_blocked_message, run_doctor
+from app.ops.project_safety import create_workspace_backup, get_backups_root, inspect_workspace, repair_workspace_metadata
 from app.project.bootstrap import bootstrap_project, open_project, sync_project_snapshot, utc_now_iso
 from app.project.database import (
     CANONICAL_SUBTITLE_TRACK_KIND,
@@ -175,6 +178,9 @@ class MainWindow(QMainWindow):
         self._speaker_binding_dirty = False
         self._voice_policy_loading = False
         self._voice_policy_dirty = False
+        self._last_doctor_report = None
+        self._last_cache_inventory = None
+        self._last_repair_report = None
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1360, 860)
@@ -223,6 +229,9 @@ class MainWindow(QMainWindow):
         self._media_summary = self._create_info_label("ChÆ°a cÃ³ video nguá»“n")
         self._pipeline_summary = self._create_info_label("Checklist quy trÃ¬nh chÆ°a cÃ³ dá»¯ liá»‡u")
         self._workflow_status = self._create_info_label("Quy trÃ¬nh nhanh: sáºµn sÃ ng")
+        self._doctor_summary = self._create_info_label("Doctor: chua chay")
+        self._workspace_repair_summary = self._create_info_label("Workspace safety: chua kiem tra")
+        self._cache_ops_summary = self._create_info_label("Cache ops: chua co du lieu")
 
         group = QGroupBox("Khá»Ÿi táº¡o / má»Ÿ dá»± Ã¡n")
         form = QFormLayout(group)
@@ -319,6 +328,55 @@ class MainWindow(QMainWindow):
         workflow_form.addRow("Tráº¡ng thÃ¡i", self._workflow_status)
         workflow_form.addRow("", workflow_container)
 
+        ops_group = QGroupBox("Ops & Safety")
+        ops_form = QFormLayout(ops_group)
+        self._configure_form_layout(ops_form)
+        self._cache_bucket_combo = QComboBox()
+        self._cache_bucket_combo.addItem("Tat ca bucket cache", "")
+        self._cache_bucket_combo.addItem("Audio extract", "audio")
+        self._cache_bucket_combo.addItem("ASR", "asr")
+        self._cache_bucket_combo.addItem("Translate", "translate")
+        self._cache_bucket_combo.addItem("Translate contextual", "translate_contextual")
+        self._cache_bucket_combo.addItem("TTS", "tts")
+        self._cache_bucket_combo.addItem("Mix", "mix")
+        self._cache_bucket_combo.addItem("Subs", "subs")
+        self._cache_bucket_combo.addItem("Exports", "exports")
+
+        run_doctor_button = QPushButton("Chay doctor")
+        run_doctor_button.clicked.connect(self._run_project_doctor_check)
+        backup_button = QPushButton("Tao backup")
+        backup_button.clicked.connect(self._create_manual_workspace_backup)
+        inspect_button = QPushButton("Kiem tra workspace")
+        inspect_button.clicked.connect(self._inspect_workspace_safety)
+        repair_button = QPushButton("Sua metadata stale")
+        repair_button.clicked.connect(self._repair_workspace_metadata)
+        prune_cache_button = QPushButton("Don cache mo coi")
+        prune_cache_button.clicked.connect(self._prune_orphan_cache)
+        clear_bucket_button = QPushButton("Xoa cache bucket")
+        clear_bucket_button.clicked.connect(self._clear_selected_cache_bucket)
+
+        ops_button_row_top = QHBoxLayout()
+        ops_button_row_top.addWidget(run_doctor_button)
+        ops_button_row_top.addWidget(backup_button)
+        ops_button_row_top.addWidget(inspect_button)
+        ops_button_row_top.addWidget(repair_button)
+        ops_button_row_top.addStretch(1)
+        ops_button_row_bottom = QHBoxLayout()
+        ops_button_row_bottom.addWidget(prune_cache_button)
+        ops_button_row_bottom.addWidget(self._cache_bucket_combo)
+        ops_button_row_bottom.addWidget(clear_bucket_button)
+        ops_button_row_bottom.addStretch(1)
+        ops_buttons = QVBoxLayout()
+        ops_buttons.addLayout(ops_button_row_top)
+        ops_buttons.addLayout(ops_button_row_bottom)
+        ops_buttons_container = QWidget()
+        ops_buttons_container.setLayout(ops_buttons)
+
+        ops_form.addRow("Doctor", self._doctor_summary)
+        ops_form.addRow("Workspace safety", self._workspace_repair_summary)
+        ops_form.addRow("Cache", self._cache_ops_summary)
+        ops_form.addRow("", ops_buttons_container)
+
         form.addRow("TÃªn dá»± Ã¡n", self._project_name_input)
         form.addRow("ThÆ° má»¥c dá»± Ã¡n", self._project_root_input)
         form.addRow("Video nguá»“n", self._source_video_input)
@@ -332,6 +390,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._pipeline_summary)
         layout.addWidget(group)
         layout.addWidget(workflow_group)
+        layout.addWidget(ops_group)
         layout.addWidget(
             self._build_placeholder_group(
                 "HÆ°á»›ng dáº«n nhanh",
@@ -1110,15 +1169,19 @@ class MainWindow(QMainWindow):
         self._openai_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self._default_translation_model_input = QLineEdit()
         self._ffmpeg_status = self._create_info_label("ChÆ°a kiá»ƒm tra")
+        self._settings_doctor_status = self._create_info_label("Doctor: chua chay")
 
         save_button = QPushButton("LÆ°u cÃ i Ä‘áº·t")
         save_button.clicked.connect(self._save_settings)
         check_button = QPushButton("Kiá»ƒm tra FFmpeg")
         check_button.clicked.connect(self._check_ffmpeg)
+        doctor_button = QPushButton("Chay doctor")
+        doctor_button.clicked.connect(self._run_settings_doctor_check)
 
         buttons = QHBoxLayout()
         buttons.addWidget(save_button)
         buttons.addWidget(check_button)
+        buttons.addWidget(doctor_button)
         buttons.addStretch(1)
         button_container = QWidget()
         button_container.setLayout(buttons)
@@ -1132,6 +1195,7 @@ class MainWindow(QMainWindow):
         form.addRow("MÃ´ hÃ¬nh dá»‹ch máº·c Ä‘á»‹nh", self._default_translation_model_input)
         form.addRow("", button_container)
         form.addRow("Tráº¡ng thÃ¡i kiá»ƒm tra", self._ffmpeg_status)
+        form.addRow("Doctor summary", self._settings_doctor_status)
 
         layout.addWidget(group)
         layout.addWidget(
@@ -2176,6 +2240,8 @@ class MainWindow(QMainWindow):
     def _preview_subtitles(self, *, start_from_selected: bool) -> None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return
+        if not self._ensure_doctor_ready(stages=["preview"], dialog_title="Preview"):
             return
         if not self._save_subtitle_edits(silent=True):
             QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi xem trÆ°á»›c.")
@@ -5091,9 +5157,231 @@ class MainWindow(QMainWindow):
         self._ffmpeg_status.setText(text)
         self._append_log_line("Kiá»ƒm tra FFmpeg:\n" + text)
 
+    @staticmethod
+    def _format_bytes(value: int) -> str:
+        units = ["B", "KB", "MB", "GB", "TB"]
+        amount = float(value)
+        unit = units[0]
+        for unit in units:
+            if amount < 1024.0 or unit == units[-1]:
+                break
+            amount /= 1024.0
+        return f"{amount:.2f} {unit}"
+
+    def _selected_cache_bucket_names(self) -> tuple[str, ...]:
+        bucket_name = str(self._cache_bucket_combo.currentData() or "").strip()
+        if not bucket_name:
+            return ("audio", "asr", "translate", "translate_contextual", "tts", "mix", "subs", "exports")
+        return (bucket_name,)
+
+    def _refresh_doctor_labels(self, report) -> None:
+        headline = (
+            f"Doctor: {report.error_count} blocking, {report.warning_count} warning"
+            if report.requested_stages
+            else f"Doctor: {report.error_count} error, {report.warning_count} warning"
+        )
+        lines = [headline]
+        for item in report.checks:
+            lines.append(f"- {item.name}: {item.status} | {item.message}")
+        text = "\n".join(lines)
+        self._doctor_summary.setText(text)
+        self._settings_doctor_status.setText(text)
+
+    def _effective_doctor_voice_preset(self):
+        try:
+            return self._selected_voice_preset(strict=False)
+        except Exception:
+            return None
+
+    def _run_doctor_report(self, *, stages: list[str] | tuple[str, ...] | None = None):
+        report = run_doctor(
+            settings=self._settings,
+            workspace=self._current_workspace,
+            requested_stages=stages,
+            voice_preset=self._effective_doctor_voice_preset(),
+        )
+        self._last_doctor_report = report
+        self._refresh_doctor_labels(report)
+        return report
+
+    def _ensure_doctor_ready(self, *, stages: list[str] | tuple[str, ...], dialog_title: str) -> bool:
+        report = self._run_doctor_report(stages=stages)
+        blocked_message = format_blocked_message(report, stages=stages, action_label=dialog_title.lower())
+        if not blocked_message:
+            return True
+        QMessageBox.warning(self, dialog_title, blocked_message)
+        return False
+
+    def _create_backup_if_possible(
+        self,
+        *,
+        stage: str,
+        reason: str,
+        dialog_title: str,
+        show_dialog: bool = False,
+    ) -> bool:
+        if not self._current_workspace:
+            return False
+        try:
+            manifest = create_workspace_backup(self._current_workspace, reason=reason, stage=stage)
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                dialog_title,
+                f"Blocked because khong tao duoc backup truoc khi tiep tuc:\n- {exc}",
+            )
+            return False
+        self._append_log_line(f"Tao backup truoc stage {stage}: {manifest.backup_dir}")
+        if show_dialog:
+            QMessageBox.information(self, dialog_title, f"Da tao backup tai:\n{manifest.backup_dir}")
+        return True
+
+    def _run_project_doctor_check(self) -> None:
+        report = self._run_doctor_report()
+        QMessageBox.information(
+            self,
+            "Doctor",
+            "\n".join(
+                [f"Doctor report: {report.error_count} error, {report.warning_count} warning"]
+                + [f"- {item.name}: {item.status} | {item.message}" for item in report.checks]
+            ),
+        )
+
+    def _run_settings_doctor_check(self) -> None:
+        report = self._run_doctor_report()
+        QMessageBox.information(
+            self,
+            "Doctor",
+            "\n".join(
+                [f"Doctor report: {report.error_count} error, {report.warning_count} warning"]
+                + [f"- {item.name}: {item.status} | {item.message}" for item in report.checks]
+            ),
+        )
+
+    def _inspect_workspace_safety(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Workspace safety", "Hay mo du an truoc.")
+            return
+        report = inspect_workspace(self._current_workspace)
+        self._last_repair_report = report
+        lines = [
+            f"Workspace safety: {report.error_count} error, {report.warning_count} warning",
+            f"- Da kiem tra {report.checked_file_count} file/path va {report.checked_job_count} job",
+        ]
+        lines.extend(f"- {issue.code}: {issue.message}" for issue in report.issues[:12])
+        self._workspace_repair_summary.setText("\n".join(lines))
+        QMessageBox.information(self, "Workspace safety", "\n".join(lines))
+
+    def _repair_workspace_metadata(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Workspace safety", "Hay mo du an truoc.")
+            return
+        report = repair_workspace_metadata(self._current_workspace)
+        self._last_repair_report = report
+        lines = [
+            f"Repair xong: {len(report.fixed_items)} muc duoc sua",
+            f"- Con lai: {report.error_count} error, {report.warning_count} warning",
+        ]
+        lines.extend(f"- {item}" for item in report.fixed_items[:12])
+        self._workspace_repair_summary.setText("\n".join(lines))
+        QMessageBox.information(self, "Workspace safety", "\n".join(lines))
+        self._refresh_workspace_views()
+
+    def _create_manual_workspace_backup(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Backup", "Hay mo du an truoc.")
+            return
+        self._create_backup_if_possible(
+            stage="manual_backup",
+            reason="Manual workspace backup from UI",
+            dialog_title="Backup",
+            show_dialog=True,
+        )
+        self._refresh_workspace_views()
+
+    def _prune_orphan_cache(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Cache ops", "Hay mo du an truoc.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        report = cleanup_cache(self._current_workspace, database, bucket_names=None)
+        QMessageBox.information(
+            self,
+            "Cache ops",
+            (
+                "Da don cache mo coi.\n"
+                f"- So file xoa: {len(report.deleted_paths)}\n"
+                f"- Dung luong giai phong: {self._format_bytes(report.deleted_bytes)}"
+            ),
+        )
+        self._refresh_workspace_views()
+
+    def _clear_selected_cache_bucket(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Cache ops", "Hay mo du an truoc.")
+            return
+        database = ProjectDatabase(self._current_workspace.database_path)
+        bucket_names = self._selected_cache_bucket_names()
+        report = cleanup_cache(self._current_workspace, database, bucket_names=list(bucket_names))
+        QMessageBox.information(
+            self,
+            "Cache ops",
+            (
+                f"Da don bucket: {', '.join(bucket_names)}\n"
+                f"- So file xoa: {len(report.deleted_paths)}\n"
+                f"- Dung luong giai phong: {self._format_bytes(report.deleted_bytes)}"
+            ),
+        )
+        self._refresh_workspace_views()
+
+    def _refresh_ops_views(self, database: ProjectDatabase) -> None:
+        if not self._current_workspace:
+            return
+        workspace = self._current_workspace
+        self._last_doctor_report = run_doctor(
+            settings=self._settings,
+            workspace=workspace,
+            voice_preset=self._effective_doctor_voice_preset(),
+        )
+        self._refresh_doctor_labels(self._last_doctor_report)
+
+        self._last_repair_report = inspect_workspace(workspace)
+        backup_root = get_backups_root(workspace.root_dir)
+        backup_count = (
+            len([path for path in backup_root.iterdir() if path.is_dir()])
+            if backup_root.exists()
+            else 0
+        )
+        self._workspace_repair_summary.setText(
+            "\n".join(
+                [
+                    f"Workspace safety: {self._last_repair_report.error_count} error, {self._last_repair_report.warning_count} warning",
+                    f"- Da kiem tra {self._last_repair_report.checked_file_count} file/path va {self._last_repair_report.checked_job_count} job",
+                    f"- Backups: {backup_count} thu muc trong {backup_root}",
+                ]
+            )
+        )
+
+        self._last_cache_inventory = build_cache_inventory(workspace, database)
+        total_files = sum(bucket.file_count for bucket in self._last_cache_inventory.buckets)
+        total_bytes = sum(bucket.total_bytes for bucket in self._last_cache_inventory.buckets)
+        orphan_files = sum(bucket.orphan_file_count for bucket in self._last_cache_inventory.buckets)
+        orphan_bytes = sum(bucket.orphan_bytes for bucket in self._last_cache_inventory.buckets)
+        self._cache_ops_summary.setText(
+            "\n".join(
+                [
+                    f"Cache ops: {total_files} file, {self._format_bytes(total_bytes)}",
+                    f"- Orphan: {orphan_files} file, {self._format_bytes(orphan_bytes)}",
+                    "- Cleanup se giu lai artifact dang duoc runtime_state/job_runs tham chieu.",
+                ]
+            )
+        )
+
     def _run_probe_media_job(self) -> str | None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return None
+        if not self._ensure_doctor_ready(stages=["probe_media"], dialog_title="Doc metadata"):
             return None
 
         source_video_path = self._resolve_source_video_path()
@@ -5125,6 +5413,8 @@ class MainWindow(QMainWindow):
     def _run_extract_audio_job(self) -> str | None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return None
+        if not self._ensure_doctor_ready(stages=["extract_audio"], dialog_title="Tach am thanh"):
             return None
 
         source_video_path = self._resolve_source_video_path()
@@ -5169,6 +5459,8 @@ class MainWindow(QMainWindow):
     def _run_asr_job(self) -> str | None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return None
+        if not self._ensure_doctor_ready(stages=["asr"], dialog_title="ASR"):
             return None
 
         workspace = self._current_workspace
@@ -5549,6 +5841,12 @@ class MainWindow(QMainWindow):
         project_row = database.get_project()
         if project_row is None:
             return
+        if not self._create_backup_if_possible(
+            stage="review_resolution",
+            reason="Review resolution may overwrite canonical contextual outputs",
+            dialog_title="Review",
+        ):
+            return
         try:
             updated_count = apply_review_resolution(
                 database,
@@ -5724,6 +6022,8 @@ class MainWindow(QMainWindow):
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
+        if not self._ensure_doctor_ready(stages=["translate"], dialog_title="Dich"):
+            return None
         workspace = self._current_workspace
         database = ProjectDatabase(workspace.database_path)
         project_row = database.get_project()
@@ -5734,6 +6034,12 @@ class MainWindow(QMainWindow):
             return None
         if not template:
             QMessageBox.warning(self, "ChÆ°a cÃ³ prompt", "KhÃ´ng tÃ¬m tháº¥y prompt template trong dá»± Ã¡n.")
+            return None
+        if not self._create_backup_if_possible(
+            stage="translate",
+            reason="Translation rerun may overwrite canonical translation state",
+            dialog_title="Dich",
+        ):
             return None
 
         source_language = segments[0]["source_lang"] or project_row["source_language"] or "auto"
@@ -5875,6 +6181,8 @@ class MainWindow(QMainWindow):
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
+        if not self._ensure_doctor_ready(stages=["tts"], dialog_title="TTS"):
+            return None
         if not self._save_subtitle_edits(silent=True):
             QMessageBox.warning(self, "TTS", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi cháº¡y TTS.")
             return None
@@ -5906,6 +6214,12 @@ class MainWindow(QMainWindow):
             warn_on_unresolved=True,
         )
         if preset is None:
+            return None
+        if not self._create_backup_if_possible(
+            stage="tts",
+            reason="TTS rerun may overwrite active voice artifacts",
+            dialog_title="TTS",
+        ):
             return None
         stage_hash = build_tts_stage_hash(
             subtitle_rows,
@@ -5983,6 +6297,8 @@ class MainWindow(QMainWindow):
     def _run_build_voice_track_job(self) -> str | None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return None
+        if not self._ensure_doctor_ready(stages=["voice_track"], dialog_title="Track giong"):
             return None
         if not self._save_subtitle_edits(silent=True):
             QMessageBox.warning(self, "Track giá»ng", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi táº¡o track giá»ng.")
@@ -6091,6 +6407,8 @@ class MainWindow(QMainWindow):
     def _run_mixdown_job(self) -> str | None:
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
+            return None
+        if not self._ensure_doctor_ready(stages=["mixdown"], dialog_title="Tron am thanh"):
             return None
         if not self._save_subtitle_edits(silent=True):
             QMessageBox.warning(self, "Trá»™n Ã¢m thanh", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi trá»™n Ã¢m thanh.")
@@ -6266,6 +6584,8 @@ class MainWindow(QMainWindow):
         if not self._current_workspace:
             QMessageBox.warning(self, "ChÆ°a cÃ³ dá»± Ã¡n", "HÃ£y táº¡o hoáº·c má»Ÿ dá»± Ã¡n trÆ°á»›c.")
             return None
+        if not self._ensure_doctor_ready(stages=["export_video"], dialog_title="Xuat video"):
+            return None
         if not self._save_subtitle_edits(silent=True):
             QMessageBox.warning(self, "BiÃªn táº­p phá»¥ Ä‘á»", "KhÃ´ng thá»ƒ lÆ°u chá»‰nh sá»­a phá»¥ Ä‘á» trÆ°á»›c khi xuáº¥t video.")
             return None
@@ -6308,6 +6628,12 @@ class MainWindow(QMainWindow):
             warn_on_unresolved=True,
         )
         if preset is None:
+            return None
+        if not self._create_backup_if_possible(
+            stage="export_video",
+            reason="Export rerun may overwrite downstream artifacts",
+            dialog_title="Xuat video",
+        ):
             return None
 
         video_row = database.get_primary_video_asset(workspace.project_id)
@@ -6608,8 +6934,21 @@ class MainWindow(QMainWindow):
 
         database = ProjectDatabase(self._current_workspace.database_path)
         project_row = database.get_project()
+        backup_root = get_backups_root(self._current_workspace.root_dir)
+        backup_count = len([path for path in backup_root.iterdir() if path.is_dir()]) if backup_root.exists() else 0
+        self._project_summary.setText(
+            "Du an hien tai:\n"
+            f"- Ten: {self._current_workspace.name}\n"
+            f"- Thu muc: {self._current_workspace.root_dir}\n"
+            f"- CSDL: {self._current_workspace.database_path}\n"
+            f"- Cache: {self._current_workspace.cache_dir}\n"
+            f"- Exports: {self._current_workspace.exports_dir}\n"
+            f"- Ops: {self._current_workspace.root_dir / '.ops'}\n"
+            f"- Backup folders: {backup_count}"
+        )
         self._reload_speaker_bindings()
         self._reload_voice_policies()
+        self._refresh_ops_views(database)
         video_row = database.get_primary_video_asset(self._current_workspace.project_id)
         if video_row:
             self._media_summary.setText(

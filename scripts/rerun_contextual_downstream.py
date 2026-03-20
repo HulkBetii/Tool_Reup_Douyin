@@ -8,6 +8,8 @@ from pathlib import Path
 from app.audio.mixdown import mix_audio_tracks
 from app.audio.voiceover_track import build_voice_track
 from app.core.jobs import CancellationToken, JobContext
+from app.ops.doctor import format_blocked_message, run_doctor
+from app.ops.project_safety import create_workspace_backup, inspect_workspace
 from app.core.settings import load_settings
 from app.media.extract_audio import extract_audio_artifacts, load_cached_audio_artifacts
 from app.media.ffprobe_service import probe_media
@@ -139,6 +141,30 @@ def main() -> int:
     sync_project_snapshot(workspace)
 
     voice_preset = _resolve_voice_preset(workspace.root_dir, args.voice_preset_id)
+    doctor_report = run_doctor(
+        settings=settings,
+        workspace=workspace,
+        requested_stages=["tts", "voice_track", "mixdown", "export_video"],
+        voice_preset=voice_preset,
+    )
+    blocked_message = format_blocked_message(
+        doctor_report,
+        stages=["tts", "voice_track", "mixdown", "export_video"],
+        action_label="rerun downstream",
+    )
+    if blocked_message:
+        raise RuntimeError(blocked_message)
+    repair_report = inspect_workspace(workspace)
+    if repair_report.error_count:
+        raise RuntimeError(
+            "Blocked because workspace chua an toan de rerun:\n"
+            + "\n".join(f"- {issue.message}" for issue in repair_report.issues if issue.severity == "error")
+        )
+    backup_manifest = create_workspace_backup(
+        workspace,
+        reason="Safe rerun downstream before TTS -> export",
+        stage="rerun_downstream",
+    )
     segments = database.list_segments(workspace.project_id)
     total_duration_ms = max(int(row["end_ms"]) for row in segments) if segments else 0
     if total_duration_ms <= 0:
@@ -212,6 +238,11 @@ def main() -> int:
         "voice_preset_id": args.voice_preset_id,
         "export_preset_id": args.export_preset_id,
         "pending_review_count": pending_review_count,
+        "doctor_error_count": doctor_report.error_count,
+        "doctor_warning_count": doctor_report.warning_count,
+        "workspace_repair_error_count": repair_report.error_count,
+        "workspace_repair_warning_count": repair_report.warning_count,
+        "backup_dir": str(backup_manifest.backup_dir),
         "speaker_binding_active": bool(getattr(voice_plan, "active_bindings", False)),
         "voice_policy_active": bool(getattr(voice_plan, "active_voice_policies", False)),
         "speaker_binding_unresolved": list(getattr(voice_plan, "unresolved_speakers", [])),
