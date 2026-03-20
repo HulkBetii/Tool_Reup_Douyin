@@ -1,0 +1,53 @@
+{
+  "fixture_id": "zh-vi-insufficient-context-pre-review-failsafe",
+  "class": "pre_review_insufficient_context_fail_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Case thật từ Video_test_TQ trước review. Context không đủ để chốt nghĩa/tone thì line phải ở lại review queue và không được trôi qua downstream.",
+  "segments": [
+    {
+      "segment_id": "seg-context-0001",
+      "segment_index": 9,
+      "scene_id": "scene_tone_0000",
+      "source_text": "好",
+      "speaker_json": {
+        "character_id": "unknown",
+        "confidence": 0.5
+      },
+      "listeners_json": [],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": false,
+        "confidence": 0.5
+      },
+      "confidence_json": {
+        "overall": 0.5,
+        "speaker": 0.5,
+        "listener": 0.5,
+        "register": 0.6,
+        "relation": 0.5,
+        "translation": 0.5
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.4
+      },
+      "risk_flags_json": [
+        "insufficient_context"
+      ],
+      "review_reason_codes_json": [
+        "uncertain_speaker",
+        "tone_ambiguity",
+        "insufficient_context",
+        "low_confidence_gate"
+      ],
+      "review_question": "Who is speaking and what is the intended tone of '好' in this context?",
+      "approved_subtitle_text": "Được",
+      "approved_tts_text": "Được rồi"
+    }
+  ]
+}

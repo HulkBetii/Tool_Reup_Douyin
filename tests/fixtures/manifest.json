@@ -19,6 +19,28 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-tone-ambiguity-pre-review-failsafe",
+      "class": "pre_review_tone_ambiguity_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-tone-ambiguity-pre-review-failsafe.json",
+      "notes": "Case trước review với tone mơ hồ. Intended behavior là giữ line ở review queue cho tới khi con người chốt ngữ khí."
+    },
+    {
+      "fixture_id": "zh-vi-insufficient-context-pre-review-failsafe",
+      "class": "pre_review_insufficient_context_fail_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-insufficient-context-pre-review-failsafe.json",
+      "notes": "Case trước review với context không đủ. Intended behavior là không cho downstream đi tiếp cho tới khi review xong."
+    },
+    {
       "fixture_id": "zh-vi-uncertain-speaker-pre-review-failsafe",
       "class": "pre_review_uncertain_speaker_fail_safe",
       "languages": [

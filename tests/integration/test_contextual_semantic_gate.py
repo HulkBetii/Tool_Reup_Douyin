@@ -679,3 +679,51 @@ def test_recompute_semantic_qc_preserves_pre_review_unclear_relationship_gate(tm
     assert analysis_row["semantic_qc_passed"] == 1
     reason_codes = json.loads(analysis_row["review_reason_codes_json"] or "[]")
     assert "unclear_relationship" in reason_codes
+
+
+def test_recompute_semantic_qc_preserves_pre_review_tone_ambiguity_gate(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-tone-ambiguity-pre-review-failsafe.json")
+    row = fixture["segments"][0]
+
+    database, project_id = _seed_single_analysis_project(
+        tmp_path,
+        row=row,
+        review_status="needs_review",
+        needs_human_review=True,
+        semantic_qc_passed=True,
+    )
+
+    summary = recompute_semantic_qc(database, project_id=project_id, target_language="vi")
+    analysis_row = database.get_segment_analysis(project_id, str(row["segment_id"]))
+
+    assert summary["error_count"] >= 1
+    assert database.count_pending_segment_reviews(project_id) == 1
+    assert analysis_row is not None
+    assert analysis_row["needs_human_review"] == 1
+    assert analysis_row["review_status"] == "needs_review"
+    reason_codes = json.loads(analysis_row["review_reason_codes_json"] or "[]")
+    assert "tone_ambiguity" in reason_codes
+
+
+def test_recompute_semantic_qc_preserves_pre_review_insufficient_context_gate(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-insufficient-context-pre-review-failsafe.json")
+    row = fixture["segments"][0]
+
+    database, project_id = _seed_single_analysis_project(
+        tmp_path,
+        row=row,
+        review_status="needs_review",
+        needs_human_review=True,
+        semantic_qc_passed=True,
+    )
+
+    summary = recompute_semantic_qc(database, project_id=project_id, target_language="vi")
+    analysis_row = database.get_segment_analysis(project_id, str(row["segment_id"]))
+
+    assert summary["error_count"] >= 1
+    assert database.count_pending_segment_reviews(project_id) == 1
+    assert analysis_row is not None
+    assert analysis_row["needs_human_review"] == 1
+    assert analysis_row["review_status"] == "needs_review"
+    reason_codes = json.loads(analysis_row["review_reason_codes_json"] or "[]")
+    assert "insufficient_context" in reason_codes
