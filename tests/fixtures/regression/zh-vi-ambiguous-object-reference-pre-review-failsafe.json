@@ -1,0 +1,54 @@
+{
+  "fixture_id": "zh-vi-ambiguous-object-reference-pre-review-failsafe",
+  "class": "pre_review_ambiguous_object_reference_fail_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Case thật từ Shinchan trước review. Referent của `这把` chưa rõ thì phải ở lại review queue, không được auto-pass vì semantic QC không có rule object tracking đầy đủ.",
+  "segments": [
+    {
+      "segment_id": "seg-amb-obj-0001",
+      "segment_index": 25,
+      "scene_id": "scene_amb_0001",
+      "source_text": "这把有坏了",
+      "speaker_json": {
+        "character_id": "unknown",
+        "confidence": 0.9
+      },
+      "listeners_json": [
+        {
+          "character_id": "unknown",
+          "role": "listener",
+          "confidence": 0.9
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": false,
+        "confidence": 0.9
+      },
+      "confidence_json": {
+        "overall": 0.9,
+        "speaker": 0.9,
+        "listener": 0.9,
+        "register": 0.9,
+        "relation": 0.8,
+        "translation": 0.9
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.8
+      },
+      "risk_flags_json": [],
+      "review_reason_codes_json": [
+        "ambiguous_object_reference"
+      ],
+      "review_question": "`这把` đang chỉ vào vật gì trong ngữ cảnh này?",
+      "approved_subtitle_text": "Cái món đồ này hỏng rồi.",
+      "approved_tts_text": "Này, món đồ này hỏng rồi đấy!"
+    }
+  ]
+}

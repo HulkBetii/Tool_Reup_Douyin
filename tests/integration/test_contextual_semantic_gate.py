@@ -24,6 +24,88 @@ def _load_golden_fixture(name: str) -> dict[str, object]:
     return json.loads(fixture_path.read_text(encoding="utf-8"))
 
 
+def _seed_single_analysis_project(
+    tmp_path: Path,
+    *,
+    row: dict[str, object],
+    review_status: str,
+    needs_human_review: bool,
+    semantic_qc_passed: bool,
+) -> tuple[ProjectDatabase, str]:
+    database_path = tmp_path / "project.db"
+    database = ProjectDatabase(database_path)
+    database.initialize()
+    database.insert_project(
+        ProjectRecord(
+            project_id="project-1",
+            name="Demo",
+            root_dir=str(tmp_path),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            created_at="2026-03-20T00:00:00+00:00",
+            updated_at="2026-03-20T00:00:00+00:00",
+        )
+    )
+    database.replace_segments(
+        "project-1",
+        [
+            SegmentRecord(
+                segment_id=str(row["segment_id"]),
+                project_id="project-1",
+                segment_index=int(row["segment_index"]),
+                start_ms=0,
+                end_ms=1200,
+                source_lang="zh",
+                source_text=str(row["source_text"]),
+                source_text_norm=str(row["source_text"]),
+            )
+        ],
+    )
+    database.replace_contextual_translation_state(
+        "project-1",
+        scenes=[
+            SceneMemoryRecord(
+                scene_id=str(row["scene_id"]),
+                project_id="project-1",
+                scene_index=0,
+                start_segment_index=int(row["segment_index"]),
+                end_segment_index=int(row["segment_index"]),
+                start_ms=0,
+                end_ms=1200,
+                short_scene_summary="fixture scene",
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            )
+        ],
+        analyses=[
+            SegmentAnalysisRecord(
+                segment_id=str(row["segment_id"]),
+                project_id="project-1",
+                scene_id=str(row["scene_id"]),
+                segment_index=int(row["segment_index"]),
+                speaker_json=dict(row["speaker_json"]),
+                listeners_json=list(row["listeners_json"]),
+                honorific_policy_json=dict(row["honorific_policy_json"]),
+                resolved_ellipsis_json=dict(row["resolved_ellipsis_json"]),
+                risk_flags_json=list(row["risk_flags_json"]),
+                confidence_json=dict(row["confidence_json"]),
+                semantic_translation=str(row.get("approved_subtitle_text", "") or ""),
+                approved_subtitle_text=str(row["approved_subtitle_text"]),
+                approved_tts_text=str(row["approved_tts_text"]),
+                needs_human_review=needs_human_review,
+                review_status=review_status,
+                review_reason_codes_json=list(row.get("review_reason_codes_json", [])),
+                review_question=str(row.get("review_question", "") or ""),
+                semantic_qc_passed=semantic_qc_passed,
+                created_at="2026-03-20T00:00:00+00:00",
+                updated_at="2026-03-20T00:00:00+00:00",
+            )
+        ],
+    )
+    return database, "project-1"
+
+
 def test_recompute_semantic_qc_blocks_unsafe_tts_pronoun_injection(tmp_path: Path) -> None:
     fixture = _load_regression_fixture("zh-vi-tts-pronoun-injection-ambiguous-listener.json")
     row = fixture["segments"][0]
@@ -499,3 +581,51 @@ def test_recompute_semantic_qc_does_not_apply_address_only_alternate_to_self(tmp
     assert summary["error_count"] >= 1
     assert analysis_row is not None
     assert analysis_row["semantic_qc_passed"] == 0
+
+
+def test_recompute_semantic_qc_preserves_pre_review_ambiguous_term_gate(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-ambiguous-term-pre-review-failsafe.json")
+    row = fixture["segments"][0]
+
+    database, project_id = _seed_single_analysis_project(
+        tmp_path,
+        row=row,
+        review_status="needs_review",
+        needs_human_review=True,
+        semantic_qc_passed=True,
+    )
+
+    summary = recompute_semantic_qc(database, project_id=project_id, target_language="vi")
+    analysis_row = database.get_segment_analysis(project_id, str(row["segment_id"]))
+
+    assert summary["error_count"] == 0
+    assert database.count_pending_segment_reviews(project_id) == 1
+    assert analysis_row is not None
+    assert analysis_row["needs_human_review"] == 1
+    assert analysis_row["review_status"] == "needs_review"
+    assert analysis_row["semantic_qc_passed"] == 1
+    assert "ambiguous_term" in json.loads(analysis_row["review_reason_codes_json"] or "[]")
+
+
+def test_recompute_semantic_qc_preserves_pre_review_ambiguous_object_reference_gate(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-ambiguous-object-reference-pre-review-failsafe.json")
+    row = fixture["segments"][0]
+
+    database, project_id = _seed_single_analysis_project(
+        tmp_path,
+        row=row,
+        review_status="needs_review",
+        needs_human_review=True,
+        semantic_qc_passed=True,
+    )
+
+    summary = recompute_semantic_qc(database, project_id=project_id, target_language="vi")
+    analysis_row = database.get_segment_analysis(project_id, str(row["segment_id"]))
+
+    assert summary["error_count"] == 0
+    assert database.count_pending_segment_reviews(project_id) == 1
+    assert analysis_row is not None
+    assert analysis_row["needs_human_review"] == 1
+    assert analysis_row["review_status"] == "needs_review"
+    assert analysis_row["semantic_qc_passed"] == 1
+    assert "ambiguous_object_reference" in json.loads(analysis_row["review_reason_codes_json"] or "[]")

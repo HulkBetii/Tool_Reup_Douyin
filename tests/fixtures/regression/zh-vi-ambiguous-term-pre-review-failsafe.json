@@ -1,0 +1,54 @@
+{
+  "fixture_id": "zh-vi-ambiguous-term-pre-review-failsafe",
+  "class": "pre_review_ambiguous_term_fail_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Case thật từ Shinchan trước review. Thuật ngữ mơ hồ như `三家` phải giữ nguyên trạng thái needs_review thay vì tự coi là an toàn chỉ vì semantic QC rule-based không bắt được.",
+  "segments": [
+    {
+      "segment_id": "seg-amb-term-0001",
+      "segment_index": 6,
+      "scene_id": "scene_amb_0000",
+      "source_text": "是这个三家怎么回事",
+      "speaker_json": {
+        "character_id": "Unnamed Speaker 1",
+        "confidence": 0.6
+      },
+      "listeners_json": [
+        {
+          "character_id": "Unnamed Speaker 2",
+          "role": "listener",
+          "confidence": 0.6
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "",
+        "address_term": "",
+        "locked": false,
+        "confidence": 0.8
+      },
+      "confidence_json": {
+        "overall": 0.78,
+        "speaker": 0.76,
+        "listener": 0.74,
+        "register": 0.77,
+        "relation": 0.72,
+        "translation": 0.8
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.7
+      },
+      "risk_flags_json": [],
+      "review_reason_codes_json": [
+        "ambiguous_term"
+      ],
+      "review_question": "Ý nghĩa của `三家` trong câu này là gì?",
+      "approved_subtitle_text": "Cái \"ba cái này\" là sao vậy?",
+      "approved_tts_text": "Cái \"ba cái này\" là sao vậy?"
+    }
+  ]
+}
