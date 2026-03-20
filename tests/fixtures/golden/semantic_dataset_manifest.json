@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "description": "Stable semantic QC reference cases. Each entry declares the expected QC outcome so refactors can be checked against intentional behavior.",
+  "cases": [
+    {
+      "fixture_id": "zh-vi-family-elder-sibling-consistent-safe",
+      "path": "tests/fixtures/golden/zh-vi-family-elder-sibling-consistent-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "honorific_drift",
+          "sub_tts_pronoun_divergence",
+          "directionality_mismatch",
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-narration-neutral-safe",
+      "path": "tests/fixtures/golden/zh-vi-narration-neutral-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "pronoun_without_evidence",
+          "addressee_mismatch",
+          "sub_tts_pronoun_divergence",
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-locked-relation-allowed-alternates-safe",
+      "path": "tests/fixtures/golden/zh-vi-locked-relation-allowed-alternates-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "directionality_mismatch"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-side-specific-alternates-address-does-not-relax-self",
+      "path": "tests/fixtures/golden/zh-vi-side-specific-alternates-address-does-not-relax-self.json",
+      "expected": {
+        "error_count": 1,
+        "warning_count": 0,
+        "required_codes": [
+          "directionality_mismatch"
+        ],
+        "forbidden_codes": []
+      }
+    }
+  ]
+}

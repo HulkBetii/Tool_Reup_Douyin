@@ -19,6 +19,28 @@
   },
   "fixtures": [
     {
+      "fixture_id": "zh-vi-family-elder-sibling-consistent-safe",
+      "class": "consistent_honorific_policy",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-family-elder-sibling-consistent-safe.json",
+      "notes": "Case golden doi thoai anh-em on dinh, subtitle/TTS bam cung policy va khong bi semantic QC flag nham."
+    },
+    {
+      "fixture_id": "zh-vi-narration-neutral-safe",
+      "class": "neutral_narration_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-narration-neutral-safe.json",
+      "notes": "Case golden thuyet minh trung tinh, khong co listener va khong duoc bi semantic QC ep xung ho."
+    },
+    {
       "fixture_id": "zh-vi-tts-pronoun-injection-ambiguous-listener",
       "class": "unsafe_pronoun_injection_under_ambiguous_listener",
       "languages": [

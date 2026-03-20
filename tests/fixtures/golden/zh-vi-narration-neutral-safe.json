@@ -1,0 +1,36 @@
+{
+  "fixture_id": "zh-vi-narration-neutral-safe",
+  "class": "neutral_narration_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case thuyet minh trung tinh, khong duoc bi semantic QC ep xung ho hoac flag sai vi khong co listener.",
+  "segments": [
+    {
+      "segment_id": "seg-0201",
+      "segment_index": 201,
+      "scene_id": "scene_0040",
+      "source_text": "天快黑了，树林里的温度开始下降。",
+      "speaker_json": {
+        "character_id": "narrator",
+        "confidence": 0.94
+      },
+      "listeners_json": [],
+      "honorific_policy_json": {},
+      "confidence_json": {
+        "overall": 0.93,
+        "speaker": 0.94,
+        "listener": 0.0,
+        "relation": 0.0
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Trời sắp tối, nhiệt độ trong rừng bắt đầu hạ xuống.",
+      "approved_tts_text": "Trời sắp tối, nhiệt độ trong rừng bắt đầu hạ xuống."
+    }
+  ]
+}

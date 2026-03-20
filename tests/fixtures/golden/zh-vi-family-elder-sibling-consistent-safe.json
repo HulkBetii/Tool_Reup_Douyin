@@ -1,0 +1,89 @@
+{
+  "fixture_id": "zh-vi-family-elder-sibling-consistent-safe",
+  "class": "consistent_honorific_policy",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Case doi thoai than thuoc, anh-em da khoa ro va ca subtitle/TTS deu bam cung mot policy.",
+  "relationship_defaults": {
+    "char_a->char_b": {
+      "default_self_term": "anh",
+      "default_address_term": "em",
+      "status": "locked_by_human"
+    }
+  },
+  "segments": [
+    {
+      "segment_id": "seg-0101",
+      "segment_index": 101,
+      "scene_id": "scene_0020",
+      "source_text": "快点，别磨蹭了。",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.96
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.95
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "anh",
+        "address_term": "em",
+        "confidence": 0.95
+      },
+      "confidence_json": {
+        "overall": 0.94,
+        "speaker": 0.96,
+        "listener": 0.95,
+        "relation": 0.95
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.92
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Mau lên, em đừng chần chừ nữa.",
+      "approved_tts_text": "Mau lên, em đừng chần chừ nữa."
+    },
+    {
+      "segment_id": "seg-0102",
+      "segment_index": 102,
+      "scene_id": "scene_0020",
+      "source_text": "知道了，我这就来。",
+      "speaker_json": {
+        "character_id": "char_a",
+        "confidence": 0.95
+      },
+      "listeners_json": [
+        {
+          "character_id": "char_b",
+          "role": "primary",
+          "confidence": 0.95
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "rel:char_a->char_b",
+        "self_term": "anh",
+        "address_term": "em",
+        "confidence": 0.95
+      },
+      "confidence_json": {
+        "overall": 0.94,
+        "speaker": 0.95,
+        "listener": 0.95,
+        "relation": 0.95
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.92
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Anh biết rồi, anh tới ngay đây.",
+      "approved_tts_text": "Anh biết rồi, anh tới ngay đây."
+    }
+  ]
+}
