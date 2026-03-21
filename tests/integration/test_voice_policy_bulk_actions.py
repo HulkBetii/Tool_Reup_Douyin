@@ -500,7 +500,7 @@ def test_voice_plan_preview_reports_register_style_sources_and_rerun_button_uses
 
     assert captured == {
         "stages": ["tts", "voice_track", "mixdown", "export_video"],
-        "workflow_name": "Rerun downstream only",
+        "workflow_name": "Chạy lại downstream",
     }
 
     window.close()
