@@ -4758,9 +4758,9 @@ class MainWindow(QMainWindow):
         )
         self._append_log_line(
             "Nhập hàng loạt preset giọng: "
-            f"da_nhap={len(report.imported_presets)} "
-            f"thieu_txt={len(report.skipped_missing_text)} "
-            f"txt_rong={len(report.skipped_empty_text)}"
+            f"đã nhập={len(report.imported_presets)} "
+            f"thiếu .txt={len(report.skipped_missing_text)} "
+            f".txt rỗng={len(report.skipped_empty_text)}"
         )
         QMessageBox.information(
             self,
@@ -5304,7 +5304,7 @@ class MainWindow(QMainWindow):
         report = repair_workspace_metadata(self._current_workspace)
         self._last_repair_report = report
         lines = [
-            f"Repair xong: {len(report.fixed_items)} mục được sửa",
+            f"Sửa metadata xong: {len(report.fixed_items)} mục được sửa",
             f"- Còn lại: {report.error_count} error, {report.warning_count} warning",
         ]
         lines.extend(f"- {item}" for item in report.fixed_items[:12])

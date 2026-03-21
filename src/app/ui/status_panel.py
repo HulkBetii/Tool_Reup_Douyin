@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -24,9 +26,13 @@ class StatusPanel(QWidget):
         self._row_by_job_id: dict[str, int] = {}
 
         self._title = QLabel("Tiến trình tác vụ")
+        self._title.setWordWrap(True)
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels(["Mã job", "Công đoạn", "Trạng thái", "Tiến độ", "Thông báo"])
         self._table.setWordWrap(True)
+        self._table.setMinimumWidth(0)
+        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self._table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         header = self._table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
