@@ -1,0 +1,17 @@
+{
+  "segment": {
+    "segment_id": "seg-1",
+    "segment_index": 0,
+    "start_ms": 0,
+    "end_ms": 1000,
+    "tts_text": "Xin chao ban",
+    "subtitle_text": "Xin chao ban",
+    "translated_text": "Xin chao ban",
+    "source_text": "你好"
+  },
+  "cached_artifact": {
+    "duration_ms": 2200,
+    "sample_rate": 24000,
+    "voice_id": "default"
+  }
+}

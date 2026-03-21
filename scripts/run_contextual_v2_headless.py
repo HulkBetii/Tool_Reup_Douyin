@@ -107,6 +107,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-language", default="vi")
     parser.add_argument("--asr-language", default="zh")
     parser.add_argument("--prompt-template-id", default="contextual_cartoon_fun_adaptation")
+    parser.add_argument("--project-profile-id")
     return parser.parse_args()
 
 
@@ -143,6 +144,7 @@ def main() -> int:
             source_language=args.source_language,
             target_language=args.target_language,
             source_video_path=clip_path,
+            project_profile_id=args.project_profile_id,
         )
     )
     database = ProjectDatabase(workspace.database_path)
@@ -223,6 +225,7 @@ def main() -> int:
         "input_video": str(input_video),
         "clip_path": str(clip_path),
         "translation_mode": "contextual_v2",
+        "project_profile_id": args.project_profile_id,
         "selected_template": selected_template.template_id,
         "stage_hash": stage_hash,
         "asr_segment_count": len(segments),

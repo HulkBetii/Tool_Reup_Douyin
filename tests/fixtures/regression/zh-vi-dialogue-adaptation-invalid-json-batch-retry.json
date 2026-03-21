@@ -1,0 +1,13 @@
+{
+  "stage_label": "Dialogue adaptation",
+  "scene_id": "scene-1",
+  "batch_rows": [
+    {
+      "segment_id": "seg-1"
+    },
+    {
+      "segment_id": "seg-2"
+    }
+  ],
+  "invalid_json": "{\"items\":[{\"segment_id\":\"seg-1\",\"subtitle_text\":\"Dang noi do"
+}

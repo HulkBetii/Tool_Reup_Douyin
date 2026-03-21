@@ -15,6 +15,7 @@ from app.media.extract_audio import extract_audio_artifacts, load_cached_audio_a
 from app.media.ffprobe_service import probe_media
 from app.project.bootstrap import open_project, sync_project_snapshot
 from app.project.database import ProjectDatabase
+from app.project.profiles import resolve_project_profile_mix_defaults
 from app.subtitle.export import export_subtitles
 from app.subtitle.hardsub import export_hardsub_video
 from app.tts.factory import create_tts_engine
@@ -116,8 +117,8 @@ def main() -> int:
     parser.add_argument("--project-root", required=True, type=Path)
     parser.add_argument("--voice-preset-id", default="vieneu-default-vi")
     parser.add_argument("--export-preset-id", default="youtube-16x9")
-    parser.add_argument("--original-volume", type=float, default=0.35)
-    parser.add_argument("--voice-volume", type=float, default=1.0)
+    parser.add_argument("--original-volume", type=float)
+    parser.add_argument("--voice-volume", type=float)
     args = parser.parse_args()
 
     settings = load_settings()
@@ -139,6 +140,11 @@ def main() -> int:
     database.set_active_voice_preset_id(workspace.project_id, args.voice_preset_id)
     database.set_active_export_preset_id(workspace.project_id, args.export_preset_id)
     sync_project_snapshot(workspace)
+    resolved_original_volume, resolved_voice_volume, profile_state = resolve_project_profile_mix_defaults(
+        workspace.root_dir,
+        original_volume=args.original_volume,
+        voice_volume=args.voice_volume,
+    )
 
     voice_preset = _resolve_voice_preset(workspace.root_dir, args.voice_preset_id)
     doctor_report = run_doctor(
@@ -207,8 +213,8 @@ def main() -> int:
         original_audio_path=original_audio.audio_48k_path,
         voice_track_path=voice_track.voice_track_path,
         ffmpeg_path=settings.dependency_paths.ffmpeg_path,
-        original_volume=args.original_volume,
-        voice_volume=args.voice_volume,
+        original_volume=resolved_original_volume,
+        voice_volume=resolved_voice_volume,
     )
     srt_path = export_subtitles(
         workspace,
@@ -235,8 +241,11 @@ def main() -> int:
 
     summary = {
         "project_root": str(workspace.root_dir),
+        "project_profile_id": profile_state.project_profile_id if profile_state else None,
         "voice_preset_id": args.voice_preset_id,
         "export_preset_id": args.export_preset_id,
+        "original_volume": resolved_original_volume,
+        "voice_volume": resolved_voice_volume,
         "pending_review_count": pending_review_count,
         "doctor_error_count": doctor_report.error_count,
         "doctor_warning_count": doctor_report.warning_count,

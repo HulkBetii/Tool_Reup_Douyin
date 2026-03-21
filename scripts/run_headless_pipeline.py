@@ -22,6 +22,7 @@ from app.media.ffprobe_service import attach_source_video_to_project, probe_medi
 from app.project.bootstrap import bootstrap_project, sync_project_snapshot, utc_now_iso
 from app.project.database import ProjectDatabase
 from app.project.models import JobRunRecord, ProjectInitRequest, ProjectWorkspace
+from app.project.profiles import resolve_project_profile_mix_defaults
 from app.subtitle.export import export_subtitles
 from app.subtitle.hardsub import export_hardsub_video
 from app.subtitle.qc import SubtitleQcConfig, analyze_subtitle_rows
@@ -214,10 +215,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--target-language", default="vi")
     parser.add_argument("--asr-language", default="zh")
     parser.add_argument("--prompt-template-id", default="default-vi-style")
+    parser.add_argument("--project-profile-id")
     parser.add_argument("--voice-preset-id", default="vieneu-default-vi")
     parser.add_argument("--export-preset-id", default="youtube-16x9")
-    parser.add_argument("--original-volume", type=float, default=0.35)
-    parser.add_argument("--voice-volume", type=float, default=1.0)
+    parser.add_argument("--original-volume", type=float)
+    parser.add_argument("--voice-volume", type=float)
     parser.add_argument("--bgm-volume", type=float, default=0.15)
     return parser.parse_args()
 
@@ -256,6 +258,7 @@ def main() -> int:
             source_language=args.source_language,
             target_language=args.target_language,
             source_video_path=clip_path,
+            project_profile_id=args.project_profile_id,
         )
     )
     database = ProjectDatabase(workspace.database_path)
@@ -263,6 +266,11 @@ def main() -> int:
     database.set_active_export_preset_id(workspace.project_id, args.export_preset_id)
     database.set_active_watermark_profile_id(workspace.project_id, "watermark-none")
     sync_project_snapshot(workspace)
+    resolved_original_volume, resolved_voice_volume, profile_state = resolve_project_profile_mix_defaults(
+        workspace.root_dir,
+        original_volume=args.original_volume,
+        voice_volume=args.voice_volume,
+    )
 
     runner = StageRunner(workspace)
 
@@ -446,8 +454,8 @@ def main() -> int:
             original_audio_path=extracted_audio.audio_48k_path,
             voice_track_path=voice_track_result.voice_track_path,
             ffmpeg_path=settings.dependency_paths.ffmpeg_path,
-            original_volume=args.original_volume,
-            voice_volume=args.voice_volume,
+            original_volume=resolved_original_volume,
+            voice_volume=resolved_voice_volume,
             bgm_path=None,
             bgm_volume=args.bgm_volume,
         ),
@@ -510,6 +518,7 @@ def main() -> int:
 
     summary = {
         "project_root": str(workspace.root_dir),
+        "project_profile_id": profile_state.project_profile_id if profile_state else None,
         "project_json_path": str(workspace.project_json_path),
         "input_video": str(input_video),
         "clip_video": str(clip_path),
@@ -525,6 +534,8 @@ def main() -> int:
             "warnings": qc_report.warning_count,
             "total_segments": qc_report.total_segments,
         },
+        "original_volume": resolved_original_volume,
+        "voice_volume": resolved_voice_volume,
     }
     summary_path = workspace.root_dir / "pipeline_result.json"
     summary_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

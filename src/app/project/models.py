@@ -12,6 +12,7 @@ class ProjectInitRequest:
     target_language: str = "vi"
     source_video_path: Path | None = None
     translation_mode: str | None = None
+    project_profile_id: str | None = None
 
 
 @dataclass(slots=True)

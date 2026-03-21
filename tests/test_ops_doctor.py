@@ -137,3 +137,24 @@ def test_run_doctor_blocks_tts_when_vieneu_local_missing_espeak(
 
     blocking_names = {item.name for item in report.blocking_checks_for(["tts"])}
     assert "vieneu_local" in blocking_names
+
+
+def test_run_doctor_accepts_mpv_when_runtime_import_works_even_if_find_spec_is_none(
+    tmp_path: Path,
+    writable_environment: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = SimpleNamespace(root_dir=tmp_path / "workspace", cache_dir=tmp_path / "workspace" / "cache")
+    workspace.root_dir.mkdir(parents=True, exist_ok=True)
+    workspace.cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("app.ops.doctor.importlib.util.find_spec", lambda _name: None)
+    monkeypatch.setattr("app.ops.doctor.load_mpv_module", lambda _value: object())
+
+    report = run_doctor(
+        settings=_settings(tmp_path),
+        workspace=workspace,
+        requested_stages=["preview"],
+    )
+
+    mpv_row = next(item for item in report.checks if item.name == "mpv")
+    assert mpv_row.status == "ok"

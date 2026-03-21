@@ -5,7 +5,8 @@ param(
     [string]$FfmpegBinDir = "",
     [string]$MpvDllPath = "",
     [string]$EspeakRoot = "",
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,7 +81,7 @@ if (-not (Test-Path $pythonPath)) {
 
 if (-not $FfmpegBinDir -and $settings -and $settings.dependency_paths.ffmpeg_path) {
     $candidateDir = Split-Path $settings.dependency_paths.ffmpeg_path -Parent
-    if (Test-Path (Join-Path $candidateDir "ffmpeg.exe") -and Test-Path (Join-Path $candidateDir "ffprobe.exe")) {
+    if ((Test-Path (Join-Path $candidateDir "ffmpeg.exe")) -and (Test-Path (Join-Path $candidateDir "ffprobe.exe"))) {
         $FfmpegBinDir = $candidateDir
     }
 }
@@ -92,6 +93,17 @@ if (-not $EspeakRoot) {
     if (Test-Path $defaultEspeakRoot) {
         $EspeakRoot = $defaultEspeakRoot
     }
+}
+
+if ($DryRun) {
+    Write-Host "Dry run: build prerequisites resolved"
+    Write-Host ("- Python: {0}" -f $pythonPath)
+    Write-Host ("- DistRoot: {0}" -f $resolvedDistRoot)
+    Write-Host ("- WorkRoot: {0}" -f $resolvedWorkRoot)
+    Write-Host ("- FfmpegBinDir: {0}" -f ($(if ($FfmpegBinDir) { $FfmpegBinDir } else { "<none>" })))
+    Write-Host ("- MpvDllPath: {0}" -f ($(if ($MpvDllPath) { $MpvDllPath } else { "<none>" })))
+    Write-Host ("- EspeakRoot: {0}" -f ($(if ($EspeakRoot) { $EspeakRoot } else { "<none>" })))
+    exit 0
 }
 
 if ($Clean) {

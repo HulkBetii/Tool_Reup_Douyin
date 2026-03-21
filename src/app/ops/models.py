@@ -167,3 +167,62 @@ class BackupManifest:
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class ValidationProjectEntry:
+    label: str
+    source_path: Path
+    copied_path: Path
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class ValidationKitManifest:
+    created_at: str
+    kit_root: Path
+    bundle_dir: Path
+    smoke_script_path: Path
+    instructions_path: Path
+    report_template_path: Path
+    local_smoke_log_path: Path
+    local_doctor_report_path: Path
+    projects: list[ValidationProjectEntry]
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class CleanMachineProjectResult:
+    label: str
+    project_path: Path
+    rerun_summary_path: Path | None = None
+    output_video_path: Path | None = None
+    rerun_passed: bool | None = None
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe(asdict(self))
+
+
+@dataclass(slots=True)
+class CleanMachineValidationReport:
+    generated_at: str
+    kit_root: Path
+    machine_label: str
+    windows_version: str
+    bundle_dir: Path
+    bundle_doctor_report_path: Path | None = None
+    bundle_smoke_log_path: Path | None = None
+    bundle_smoke_passed: bool | None = None
+    preview_project_label: str | None = None
+    preview_passed: bool | None = None
+    project_results: list[CleanMachineProjectResult] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _json_safe(asdict(self))

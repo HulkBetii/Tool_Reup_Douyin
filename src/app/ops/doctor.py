@@ -10,7 +10,7 @@ from app.core.paths import get_appdata_dir
 from app.core.settings import AppSettings
 from app.ops.models import DoctorCheckResult, DoctorReport, utc_now_iso
 from app.project.models import ProjectWorkspace
-from app.subtitle.preview import PreviewUnavailableError, resolve_mpv_dll_path
+from app.subtitle.preview import PreviewUnavailableError, load_mpv_module, resolve_mpv_dll_path
 from app.tts.models import VoicePreset
 from app.tts.vieneu_engine import detect_vieneu_installation, get_vieneu_mode
 
@@ -90,9 +90,15 @@ def _check_mpv(settings: AppSettings) -> DoctorCheckResult:
             fix_hint="Cau hinh mpv_dll_path trong Cai dat hoac copy mpv-2.dll vao bundle.",
             blocking_stages=("preview",),
         )
-    mpv_module_ready = importlib.util.find_spec("mpv") is not None
+    module_spec = importlib.util.find_spec("mpv")
+    try:
+        if module_spec is None:
+            load_mpv_module(settings.dependency_paths.mpv_dll_path)
+        mpv_module_ready = True
+    except Exception:
+        mpv_module_ready = False
     status = "ok" if mpv_module_ready else "error"
-    message = "mpv preview san sang" if mpv_module_ready else "Tim thay mpv dll nhung chua cai python-mpv"
+    message = "mpv preview san sang" if mpv_module_ready else "Tim thay mpv dll nhung khong tai duoc python-mpv"
     return DoctorCheckResult(
         name="mpv",
         status=status,

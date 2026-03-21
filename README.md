@@ -55,6 +55,7 @@ Slice da duoc khoi tao trong repo nay:
 - Manual speaker -> voice preset binding theo project, co fail-safe gate truoc TTS/export va fallback an toan cho placeholder speaker `unknown_*`
 - Voice policy theo nhan vat/quan he: relationship override > character fallback > preset mac dinh, van ton trong speaker binding la muc uu tien cao nhat
 - Voice style policy theo nhan vat/quan he: co the override `speed/volume/pitch` theo tung speaker hoac speaker->listener ma khong can doi preset
+- Project profile tai su dung cho workspace narration `zh -> vi`, dong goi `VieNeu speed`, sub style, va downstream mix defaults
 - PyInstaller spec + PowerShell build scripts + Inno Setup script cho ban Windows may sach
 
 ## Cau truc
@@ -126,6 +127,10 @@ Ghi chu packaging:
 - `build_installer.ps1` can `ISCC.exe` cua Inno Setup 6; neu khong nam o vi tri mac dinh, truyen them `-IsccPath`.
 - Smoke bundle nhanh:
   - `powershell -ExecutionPolicy Bypass -File .\scripts\smoke_release_bundle.ps1`
+- Chuan bi clean-machine validation kit:
+  - `python .\scripts\prepare_clean_machine_validation.py --short-project-root <path-short> --long-project-root <path-long> --clean-build`
+- Chot report sau khi test may sach:
+  - `python .\scripts\finalize_clean_machine_validation.py --kit-root <kit-root> --machine-label <vm-name> --windows-version "<windows-version>" --bundle-smoke-passed --preview-passed --short-project-summary <path> --long-project-summary <path>`
 
 ## Trang thai
 
@@ -142,6 +147,7 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
 - voice policy theo nhan vat/quan he tren nen speaker binding
 - voice style/prosody policy theo nhan vat/quan he (`speed/volume/pitch`) tren nen voice policy
 - register-aware voice style policy theo `register/tone/turn-function/relation_type`
+- reusable project profile cho narration `zh -> vi`: [docs/PROJECT_PROFILES.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\PROJECT_PROFILES.md)
 - effective voice plan preview + `Rerun downstream only` tren tab `Long tieng`
 - release hardening + ops:
   - environment doctor / preflight gate theo stage
@@ -157,6 +163,7 @@ Repo hien da vuot qua MVP nen tang va da co mot workflow dung that tren may loca
   - review reason codes
   - AI bugfix workflow docs
 - packaging/CI co ban cho may Windows local
+- clean-machine validation kit cho bundle-first release smoke tren VM / may thu hai
 - release checklist: [docs/RELEASE_CHECKLIST.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\RELEASE_CHECKLIST.md)
 
 De preview mpv tren Windows, co the cau hinh `mpv_dll_path` trong tab `Cai dat` hoac dong kem `dependencies\mpv\mpv-2.dll` trong bundle.

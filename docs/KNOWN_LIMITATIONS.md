@@ -15,6 +15,9 @@ This file tracks current limitations so future bugfixes do not confuse "not impl
    - workspace backup/repair/cache ops da co
    - nhung chua co transactional rollback day du hay auto dependency installer
 8. Packaging smoke da co headless doctor mode va checklist, nhung van can manual validation tren bundle/installer truoc khi ship cho nguoi khac.
+9. Clean-machine validation kit hien tai moi cover `bundle first`:
+   - da co script chuan bi kit + report contract
+   - installer validation van la wave tiep theo sau khi bundle pass tren may sach
 
 ## Important distinction
 

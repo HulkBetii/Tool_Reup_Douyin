@@ -26,11 +26,12 @@ This is a practical working map for regression-first debugging.
     - [src/app/core/jobs.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\core\jobs.py)
 
 - project
-  - project bootstrap, workspace layout, SQLite schema, runtime restore
+  - project bootstrap, workspace layout, SQLite schema, runtime restore, reusable project profiles
   - key files:
     - [src/app/project/bootstrap.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\bootstrap.py)
     - [src/app/project/database.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\database.py)
     - [src/app/project/models.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\models.py)
+    - [src/app/project/profiles.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\profiles.py)
     - [src/app/project/runtime_state.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\runtime_state.py)
 
 - ops
@@ -39,6 +40,7 @@ This is a practical working map for regression-first debugging.
     - [src/app/ops/doctor.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\doctor.py)
     - [src/app/ops/project_safety.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\project_safety.py)
     - [src/app/ops/cache_ops.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\cache_ops.py)
+    - [src/app/ops/release_validation.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\release_validation.py)
     - [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
 
 - media
@@ -63,6 +65,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py)
     - [src/app/translate/scene_chunker.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\scene_chunker.py)
     - [src/app/translate/semantic_qc.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\semantic_qc.py)
+  - runtime note:
+    - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py) is also the hook for stage-batch resilience. It should split batches not only for mismatched ids, but also for retryable structured-output parse failures on large scene batches.
 
 - subtitle
   - editor helpers, subtitle QC, preview, SRT/ASS export, hard-sub rendering
@@ -81,6 +85,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/tts/vieneu_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\vieneu_engine.py)
     - [src/app/audio/voiceover_track.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\voiceover_track.py)
     - [src/app/audio/mixdown.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\mixdown.py)
+  - runtime note:
+    - [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py) must preserve or probe cached clip duration metadata. If cached `duration_ms` collapses to `0`, [src/app/audio/voiceover_track.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\voiceover_track.py) will hard-trim clips to slot length and cut sentences mid-speech.
 
 - ui
   - end-user workflow, review queue, gates, manual repair entrypoints
@@ -128,6 +134,21 @@ Important distinction:
 11. voice track + mixdown produce audio artifacts
 12. export uses active subtitle track + optional mixed audio
 13. ops layer can preflight/block, backup, repair stale metadata, and prune orphan cache without changing semantic content
+
+## Reusable project profiles
+
+- available profiles live under `presets/project_profiles/*.json`
+- applied profile state lives under `workspace/.ops/project_profile_state.json`
+- current built-in narration profile:
+  - `zh-vi-narration-clear-vieneu`
+  - intended for science/exploration/wilderness narration
+  - applies:
+    - `vieneu-default-vi speed = 0.93`
+    - `default-ass FontSize = 12`
+    - recommended downstream mix default `original_volume = 0.07`
+- key files:
+  - [src/app/project/profiles.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\profiles.py)
+  - [docs/PROJECT_PROFILES.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\PROJECT_PROFILES.md)
 
 ## Best hook points for durable bugfixes
 
@@ -262,6 +283,8 @@ Current contract:
   - [src/app/ops/cache_ops.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\cache_ops.py)
 - release smoke:
   - [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
+  - [scripts/prepare_clean_machine_validation.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\prepare_clean_machine_validation.py)
+  - [scripts/finalize_clean_machine_validation.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\finalize_clean_machine_validation.py)
   - [docs/RELEASE_CHECKLIST.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\RELEASE_CHECKLIST.md)
 
 Current contract:

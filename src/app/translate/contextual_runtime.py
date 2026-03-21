@@ -6,6 +6,8 @@ from dataclasses import asdict
 from sqlite3 import Row
 from typing import Any, Callable
 
+from pydantic import ValidationError
+
 from app.core.jobs import JobContext
 from app.project.database import ProjectDatabase
 from app.project.models import CharacterProfileRecord, RelationshipProfileRecord, SceneMemoryRecord, SegmentAnalysisRecord
@@ -56,6 +58,79 @@ def _normalize_review_reason_code(raw_code: str) -> str:
     return normalized or "unspecified_review_reason"
 
 
+def _is_retryable_stage_exception(exc: Exception) -> bool:
+    if isinstance(exc, ValidationError):
+        return True
+    if isinstance(exc, RuntimeError):
+        message = " ".join(str(part) for part in exc.args).lower()
+        return any(
+            marker in message
+            for marker in (
+                "model khong tra ve du lieu co parse duoc",
+                "invalid json",
+                "json_invalid",
+                "unexpected end",
+                "eof while parsing",
+            )
+        )
+    return False
+
+
+def _summarize_retryable_stage_exception(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        error_types = sorted({str(error.get("type") or "validation_error") for error in exc.errors()})
+        return f"structured output validation failed ({', '.join(error_types)})"
+    return str(exc).strip().splitlines()[0] or exc.__class__.__name__
+
+
+def _retry_stage_batch_with_split(
+    *,
+    context: JobContext,
+    stage_label: str,
+    scene_id: str,
+    batch_rows: list[Row],
+    batch_index: int,
+    batch_count: int,
+    stage_runner: Callable[[list[Row], int, int], Any],
+    reason: str,
+) -> dict[str, Any]:
+    midpoint = max(1, len(batch_rows) // 2)
+    left_rows = batch_rows[:midpoint]
+    right_rows = batch_rows[midpoint:]
+    context.logger.warning(
+        "%s failed for scene=%s batch=%s/%s (%s). Retrying with smaller batches (%s + %s).",
+        stage_label,
+        scene_id,
+        batch_index,
+        batch_count,
+        reason,
+        len(left_rows),
+        len(right_rows),
+    )
+    merged_items = _run_stage_batch_with_retry(
+        context=context,
+        stage_label=stage_label,
+        scene_id=scene_id,
+        batch_rows=left_rows,
+        batch_index=batch_index,
+        batch_count=batch_count,
+        stage_runner=stage_runner,
+    )
+    if right_rows:
+        merged_items.update(
+            _run_stage_batch_with_retry(
+                context=context,
+                stage_label=stage_label,
+                scene_id=scene_id,
+                batch_rows=right_rows,
+                batch_index=batch_index,
+                batch_count=batch_count,
+                stage_runner=stage_runner,
+            )
+        )
+    return merged_items
+
+
 def _run_stage_batch_with_retry(
     *,
     context: JobContext,
@@ -67,7 +142,21 @@ def _run_stage_batch_with_retry(
     stage_runner: Callable[[list[Row], int, int], Any],
 ) -> dict[str, Any]:
     context.cancellation_token.raise_if_canceled()
-    output = stage_runner(batch_rows, batch_index, batch_count)
+    try:
+        output = stage_runner(batch_rows, batch_index, batch_count)
+    except Exception as exc:
+        if len(batch_rows) <= 1 or not _is_retryable_stage_exception(exc):
+            raise
+        return _retry_stage_batch_with_split(
+            context=context,
+            stage_label=stage_label,
+            scene_id=scene_id,
+            batch_rows=batch_rows,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            stage_runner=stage_runner,
+            reason=_summarize_retryable_stage_exception(exc),
+        )
     batch_items = {item.segment_id: item for item in output.items}
     try:
         _validate_stage_item_ids(
@@ -82,40 +171,16 @@ def _run_stage_batch_with_retry(
     except RuntimeError:
         if len(batch_rows) <= 1:
             raise
-        midpoint = max(1, len(batch_rows) // 2)
-        left_rows = batch_rows[:midpoint]
-        right_rows = batch_rows[midpoint:]
-        context.logger.warning(
-            "%s returned mismatched ids for scene=%s batch=%s/%s. Retrying with smaller batches (%s + %s).",
-            stage_label,
-            scene_id,
-            batch_index,
-            batch_count,
-            len(left_rows),
-            len(right_rows),
-        )
-        merged_items = _run_stage_batch_with_retry(
+        return _retry_stage_batch_with_split(
             context=context,
             stage_label=stage_label,
             scene_id=scene_id,
-            batch_rows=left_rows,
+            batch_rows=batch_rows,
             batch_index=batch_index,
             batch_count=batch_count,
             stage_runner=stage_runner,
+            reason="mismatched segment ids",
         )
-        if right_rows:
-            merged_items.update(
-                _run_stage_batch_with_retry(
-                    context=context,
-                    stage_label=stage_label,
-                    scene_id=scene_id,
-                    batch_rows=right_rows,
-                    batch_index=batch_index,
-                    batch_count=batch_count,
-                    stage_runner=stage_runner,
-                )
-            )
-        return merged_items
 
 
 def run_contextual_translation(

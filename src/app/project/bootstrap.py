@@ -13,6 +13,7 @@ from app.project.models import (
     ProjectRecord,
     ProjectWorkspace,
 )
+from app.project.profiles import apply_project_profile, ensure_project_profiles
 from app.ops.project_safety import ensure_ops_layout
 from app.translate.presets import default_translation_mode_for_languages, ensure_prompt_templates
 
@@ -33,6 +34,7 @@ PROJECT_DIRS = (
     "exports",
     "logs",
     "presets/prompts",
+    "presets/project_profiles",
     "presets/styles",
     "presets/voices",
     "presets/exports",
@@ -281,6 +283,7 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
 
     _write_default_presets(root_dir)
     ensure_prompt_templates(root_dir, request.source_language, request.target_language)
+    ensure_project_profiles(root_dir)
 
     workspace = ProjectWorkspace(
         project_id=project_id,
@@ -294,6 +297,14 @@ def bootstrap_project(request: ProjectInitRequest) -> ProjectWorkspace:
         video_asset_id=asset_record.asset_id if asset_record else None,
         source_video_path=Path(asset_record.path) if asset_record else None,
     )
+    if request.project_profile_id:
+        apply_project_profile(
+            root_dir,
+            project_id=project_id,
+            database=database,
+            project_profile_id=request.project_profile_id,
+            applied_at=now,
+        )
     sync_project_snapshot(workspace)
     return workspace
 
@@ -314,6 +325,7 @@ def open_project(root_dir: Path) -> ProjectWorkspace:
         str(payload.get("source_language", "auto")),
         str(payload.get("target_language", "vi")),
     )
+    ensure_project_profiles(resolved_root)
     workspace = ProjectWorkspace(
         project_id=payload["project_id"],
         name=payload["name"],

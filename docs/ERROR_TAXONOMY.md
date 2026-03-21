@@ -131,6 +131,7 @@ Definition:
 
 Examples:
 - video uses old mixed audio after subtitle review
+- cached TTS clips lose duration metadata on rerun, so voice track fitting trims audio before the sentence is fully spoken
 
 Typical fix:
 - invalidate state, recompute expected artifact hash, block export when stale
@@ -146,8 +147,23 @@ Examples:
 Typical fix:
 - detection, build script, installer, runtime diagnostics
 
+## 13. Translation Runtime / Batch Resilience
+
+Definition:
+- a retryable LLM batch failure aborts the whole contextual run instead of degrading safely to smaller batches
+
+Examples:
+- dialogue adaptation returns truncated structured JSON on a long scene batch and the run crashes on a parse error
+- stage output is structurally invalid for a large batch but succeeds when rows are retried in smaller slices
+
+Typical fix:
+- treat retryable structured-output parse/schema failures as a batch-size/runtime resilience issue
+- split to smaller batches automatically
+- still surface the original error once the batch is down to a single row
+
 ## Required handling rules
 
 - Ambiguous semantic cases must fail-safe to review, not silent guessing.
 - Any class-4/5/6/7/8 bug should usually produce a regression fixture.
+- Any class-13 bug should usually produce a regression fixture plus a runtime retry/guard test.
 - Export/TTS must not proceed through unsafe class-4/5/6/7 states.

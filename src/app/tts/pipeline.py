@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import wave
 from pathlib import Path
 from sqlite3 import Row
 
@@ -15,6 +16,27 @@ def _segment_tts_text(row: Row, *, allow_source_fallback: bool = True) -> str:
     if allow_source_fallback:
         return (row["tts_text"] or row["subtitle_text"] or row["translated_text"] or row["source_text"] or "").strip()
     return (row["tts_text"] or row["subtitle_text"] or row["translated_text"] or "").strip()
+
+
+def _load_cached_artifact_metadata(manifest_path: Path) -> dict[str, dict[str, object]]:
+    if not manifest_path.exists():
+        return {}
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    metadata_by_segment_id: dict[str, dict[str, object]] = {}
+    for item in payload.get("artifacts", []):
+        segment_id = str(item.get("segment_id") or "").strip()
+        if segment_id:
+            metadata_by_segment_id[segment_id] = item
+    return metadata_by_segment_id
+
+
+def _probe_wav_duration_ms(path: Path) -> int:
+    with wave.open(str(path), "rb") as handle:
+        frame_rate = handle.getframerate()
+        frame_count = handle.getnframes()
+    if frame_rate <= 0:
+        return 0
+    return max(0, int(round(frame_count * 1000 / frame_rate)))
 
 
 def synthesize_segments(
@@ -44,6 +66,7 @@ def synthesize_segments(
     raw_dir = cache_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = cache_dir / "manifest.json"
+    cached_metadata_by_segment_id = _load_cached_artifact_metadata(manifest_path)
 
     artifacts: list[SynthesizedSegmentArtifact] = []
     engine_cache: dict[str, TTSEngine] = {preset.voice_preset_id: engine}
@@ -62,7 +85,10 @@ def synthesize_segments(
             engine_cache[active_preset.voice_preset_id] = active_engine
         output_path = raw_dir / f"{row['segment_index']:04d}_{row['segment_id']}.wav"
         if output_path.exists() and output_path.stat().st_size > 44:
-            # If clip already exists, trust cache and read metadata lazily from manifest when available.
+            cached_metadata = cached_metadata_by_segment_id.get(segment_id, {})
+            cached_duration_ms = int(cached_metadata.get("duration_ms") or 0)
+            if cached_duration_ms <= 0:
+                cached_duration_ms = _probe_wav_duration_ms(output_path)
             artifact = SynthesizedSegmentArtifact(
                 segment_id=segment_id,
                 segment_index=int(row["segment_index"]),
@@ -70,9 +96,9 @@ def synthesize_segments(
                 end_ms=int(row["end_ms"]),
                 text=text,
                 raw_wav_path=output_path,
-                duration_ms=0,
-                sample_rate=active_preset.sample_rate,
-                voice_id=active_preset.voice_id,
+                duration_ms=cached_duration_ms,
+                sample_rate=int(cached_metadata.get("sample_rate") or active_preset.sample_rate),
+                voice_id=str(cached_metadata.get("voice_id") or active_preset.voice_id),
                 voice_preset_id=active_preset.voice_preset_id,
                 speaker_key=(segment_speaker_keys or {}).get(segment_id),
                 voice_speed=active_preset.speed,

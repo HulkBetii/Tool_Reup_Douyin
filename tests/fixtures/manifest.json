@@ -19,6 +19,28 @@
   },
   "fixtures": [
     {
+      "fixture_id": "tts-cached-artifact-duration-preserved",
+      "class": "tts_cached_artifact_duration_metadata",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "tts_gate",
+      "path": "tests/fixtures/regression/tts-cached-artifact-duration-preserved.json",
+      "notes": "Khi TTS clip da co trong cache, runtime phai giu duoc duration metadata hoac probe lai WAV that. Neu duration ve 0, voice track se atrim cat dut cau doc."
+    },
+    {
+      "fixture_id": "zh-vi-dialogue-adaptation-invalid-json-batch-retry",
+      "class": "structured_output_batch_json_truncation",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "translation",
+      "path": "tests/fixtures/regression/zh-vi-dialogue-adaptation-invalid-json-batch-retry.json",
+      "notes": "Dialogue adaptation batch tren scene dai co the tra ve structured JSON bi cat giua chung. Runtime phai tu split batch nho hon thay vi abort toan bo run."
+    },
+    {
       "fixture_id": "zh-vi-register-voice-style-fallback",
       "class": "register_voice_style_fallback",
       "languages": [

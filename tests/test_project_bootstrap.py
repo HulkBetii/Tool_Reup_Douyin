@@ -29,6 +29,7 @@ def test_bootstrap_project_creates_layout_and_database(tmp_path: Path) -> None:
     assert (workspace.root_dir / "cache" / "asr").exists()
     assert (workspace.root_dir / "assets" / "voices").exists()
     assert (workspace.root_dir / "presets" / "prompts" / "default-vi-style.json").exists()
+    assert (workspace.root_dir / "presets" / "project_profiles" / "zh-vi-narration-clear-vieneu.json").exists()
     assert not (workspace.root_dir / "presets" / "prompts" / "contextual_default_adaptation.json").exists()
     assert not (workspace.root_dir / "presets" / "prompts" / "contextual_cartoon_fun_adaptation.json").exists()
     assert (workspace.root_dir / "presets" / "exports" / "default_hardsub.json").exists()

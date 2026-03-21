@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import wave
 
 from app.tts.base import build_tts_stage_hash
 from app.project.models import ProjectWorkspace
@@ -30,6 +32,21 @@ class _DummyEngine:
             sample_rate=preset.sample_rate,
             voice_id=preset.voice_id,
         )
+
+
+def _load_regression_fixture(name: str) -> dict[str, object]:
+    fixture_path = Path(__file__).resolve().parent / "fixtures" / "regression" / name
+    return json.loads(fixture_path.read_text(encoding="utf-8"))
+
+
+def _write_pcm_wav(path: Path, *, sample_rate: int, duration_ms: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames = int(sample_rate * duration_ms / 1000)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(sample_rate)
+        handle.writeframes(b"\x00\x00" * max(1, frames))
 
 
 def _workspace(tmp_path: Path) -> ProjectWorkspace:
@@ -207,3 +224,91 @@ def test_synthesize_segments_uses_segment_voice_presets(tmp_path: Path, monkeypa
     assert by_segment_id["seg-1"].speaker_key == "char_narrator"
     assert by_segment_id["seg-2"].voice_preset_id == "voice-a"
     assert by_segment_id["seg-2"].speaker_key == "char_a"
+
+
+def test_synthesize_segments_keeps_cached_duration_metadata(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("tts-cached-artifact-duration-preserved.json")
+    workspace = _workspace(tmp_path)
+    preset = VoicePreset(
+        voice_preset_id="vieneu-default",
+        name="VieNeu",
+        engine="vieneu",
+        sample_rate=24000,
+        language="vi",
+    )
+    stage_hash = build_tts_stage_hash([fixture["segment"]], preset)
+    cache_dir = workspace.cache_dir / "tts" / stage_hash
+    raw_dir = cache_dir / "raw"
+    output_path = raw_dir / "0000_seg-1.wav"
+    cached_artifact = dict(fixture["cached_artifact"])
+    _write_pcm_wav(output_path, sample_rate=int(cached_artifact["sample_rate"]), duration_ms=int(cached_artifact["duration_ms"]))
+    manifest_path = cache_dir / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "stage_hash": stage_hash,
+                "voice_preset": preset.model_dump(mode="json"),
+                "artifacts": [
+                    {
+                        "segment_id": "seg-1",
+                        "segment_index": 0,
+                        "start_ms": 0,
+                        "end_ms": 1000,
+                        "text": fixture["segment"]["tts_text"],
+                        "raw_wav_path": str(output_path),
+                        "duration_ms": cached_artifact["duration_ms"],
+                        "sample_rate": cached_artifact["sample_rate"],
+                        "voice_id": cached_artifact["voice_id"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    result = synthesize_segments(
+        _DummyContext(),
+        workspace=workspace,
+        segments=[fixture["segment"]],
+        preset=preset,
+        engine=_DummyEngine(),
+    )
+
+    assert len(result.artifacts) == 1
+    artifact = result.artifacts[0]
+    assert artifact.duration_ms == int(cached_artifact["duration_ms"])
+    assert artifact.sample_rate == int(cached_artifact["sample_rate"])
+    assert artifact.voice_id == str(cached_artifact["voice_id"])
+
+
+def test_synthesize_segments_probes_cached_wav_duration_when_manifest_is_missing(tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("tts-cached-artifact-duration-preserved.json")
+    workspace = _workspace(tmp_path)
+    preset = VoicePreset(
+        voice_preset_id="vieneu-default",
+        name="VieNeu",
+        engine="vieneu",
+        sample_rate=24000,
+        language="vi",
+    )
+    stage_hash = build_tts_stage_hash([fixture["segment"]], preset)
+    output_path = workspace.cache_dir / "tts" / stage_hash / "raw" / "0000_seg-1.wav"
+    _write_pcm_wav(
+        output_path,
+        sample_rate=int(fixture["cached_artifact"]["sample_rate"]),
+        duration_ms=int(fixture["cached_artifact"]["duration_ms"]),
+    )
+
+    result = synthesize_segments(
+        _DummyContext(),
+        workspace=workspace,
+        segments=[fixture["segment"]],
+        preset=preset,
+        engine=_DummyEngine(),
+    )
+
+    assert len(result.artifacts) == 1
+    assert result.artifacts[0].duration_ms == int(fixture["cached_artifact"]["duration_ms"])

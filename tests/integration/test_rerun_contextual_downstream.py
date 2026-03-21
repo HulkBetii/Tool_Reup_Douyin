@@ -484,6 +484,131 @@ def test_rerun_contextual_downstream_creates_backup_before_running(monkeypatch: 
     assert backup_calls == [("Safe rerun downstream before TTS -> export", "rerun_downstream")]
 
 
+def test_rerun_contextual_downstream_uses_project_profile_mix_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    workspace = SimpleNamespace(
+        root_dir=tmp_path,
+        project_id="project-1",
+        database_path=tmp_path / "project.db",
+        project_json_path=tmp_path / "project.json",
+        cache_dir=tmp_path / "cache",
+        exports_dir=tmp_path / "exports",
+        source_video_path=tmp_path / "source.mp4",
+    )
+    workspace.root_dir.mkdir(parents=True, exist_ok=True)
+    workspace.cache_dir.mkdir(parents=True, exist_ok=True)
+    workspace.exports_dir.mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ops").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ops" / "project_profile_state.json").write_text(
+        json.dumps(
+            {
+                "project_profile_id": "zh-vi-narration-clear-vieneu",
+                "name": "Narration Clear VieNeu",
+                "applied_at": "2026-03-21T00:00:00+00:00",
+                "recommended_original_volume": 0.07,
+                "recommended_voice_volume": 1.0,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    workspace.project_json_path.write_text("{}", encoding="utf-8")
+    workspace.database_path.write_text("", encoding="utf-8")
+    workspace.source_video_path.write_bytes(b"video")
+
+    class _RuntimeDatabase:
+        def get_project(self):
+            return {"project_id": "project-1"}
+
+        def count_pending_segment_reviews(self, _project_id):
+            return 0
+
+        def list_segment_analyses(self, _project_id):
+            return [{"semantic_qc_passed": 1}]
+
+        def set_active_voice_preset_id(self, _project_id, _voice_preset_id):
+            return None
+
+        def set_active_export_preset_id(self, _project_id, _export_preset_id):
+            return None
+
+        def list_segments(self, _project_id):
+            return [{"segment_id": "evt-1", "end_ms": 1000}]
+
+        def get_primary_video_asset(self, _project_id):
+            return {"path": str(workspace.source_video_path)}
+
+    captured_mixdown_kwargs: dict[str, object] = {}
+
+    monkeypatch.setattr(module, "load_settings", lambda: SimpleNamespace(dependency_paths=SimpleNamespace(ffmpeg_path=None, ffprobe_path=None)))
+    monkeypatch.setattr(module, "open_project", lambda _path: workspace)
+    monkeypatch.setattr(module, "ProjectDatabase", lambda _path: _RuntimeDatabase())
+    monkeypatch.setattr(module, "sync_project_snapshot", lambda _workspace: None)
+    monkeypatch.setattr(module, "_resolve_voice_preset", lambda _root, _voice_id: _preset("vieneu-default-vi", engine="vieneu", sample_rate=24000))
+    monkeypatch.setattr(
+        module,
+        "run_doctor",
+        lambda **_kwargs: DoctorReport(generated_at="2026-03-20T00:00:00+00:00", checks=[], requested_stages=("tts",)),
+    )
+    monkeypatch.setattr(module, "inspect_workspace", lambda _workspace: SimpleNamespace(error_count=0, warning_count=0))
+    monkeypatch.setattr(
+        module,
+        "create_workspace_backup",
+        lambda _workspace, *, reason, stage: SimpleNamespace(backup_dir=tmp_path / ".ops" / "backups" / "demo"),
+    )
+    monkeypatch.setattr(
+        module,
+        "_resolve_segment_voice_plan",
+        lambda **_kwargs: (
+            None,
+            None,
+            SimpleNamespace(
+                active_bindings=False,
+                active_voice_policies=False,
+                unresolved_speakers=[],
+                missing_preset_ids=[],
+                segment_voice_preset_ids={},
+                character_policy_hits=0,
+                relationship_policy_hits=0,
+                character_style_hits=0,
+                relationship_style_hits=0,
+                register_style_hits=0,
+            ),
+        ),
+    )
+    original_audio_path = tmp_path / "orig.wav"
+    original_audio_path.write_bytes(b"orig")
+    monkeypatch.setattr(module, "_resolve_original_audio", lambda _workspace, _database, _settings: SimpleNamespace(audio_48k_path=original_audio_path))
+    tts_manifest_path = tmp_path / "tts_manifest.json"
+    tts_manifest_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(module, "synthesize_segments", lambda *args, **kwargs: SimpleNamespace(artifacts=[], manifest_path=tts_manifest_path))
+    voice_track_path = tmp_path / "voice.wav"
+    voice_track_path.write_bytes(b"voice")
+    monkeypatch.setattr(module, "build_voice_track", lambda *args, **kwargs: SimpleNamespace(voice_track_path=voice_track_path))
+
+    def _mix_audio_tracks(*args, **kwargs):
+        captured_mixdown_kwargs.update(kwargs)
+        mixed_audio_path = tmp_path / "mixed.wav"
+        mixed_audio_path.write_bytes(b"mixed")
+        return SimpleNamespace(mixed_audio_path=mixed_audio_path)
+
+    monkeypatch.setattr(module, "mix_audio_tracks", _mix_audio_tracks)
+    monkeypatch.setattr(module, "export_subtitles", lambda _workspace, *, segments, format_name, allow_source_fallback: tmp_path / f"track.{format_name}")
+    monkeypatch.setattr(module, "export_hardsub_video", lambda *args, **kwargs: workspace.exports_dir / "out.mp4")
+    monkeypatch.setattr(module, "create_tts_engine", lambda _preset, project_root=None: object())
+    monkeypatch.setattr(module.sys, "argv", ["rerun_contextual_downstream.py", "--project-root", str(tmp_path)])
+
+    exit_code = module.main()
+
+    assert exit_code == 0
+    assert captured_mixdown_kwargs["original_volume"] == 0.07
+    assert captured_mixdown_kwargs["voice_volume"] == 1.0
+
+
 def test_rerun_contextual_downstream_blocks_when_doctor_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     module = _load_script_module()
     workspace = SimpleNamespace(
