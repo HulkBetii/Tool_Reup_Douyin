@@ -42,9 +42,37 @@ COMMON_VI_PRONOUNS = {
     "thầy",
     "thay",
     "sư phụ",
+    "su phu",
     "sư huynh",
+    "su huynh",
     "sư tỷ",
+    "su ty",
+    "chúng ta",
+    "chung ta",
+    "chúng tôi",
+    "chung toi",
+    "quý vị",
+    "quy vi",
+    "quý khách",
+    "quy khach",
+    "các bạn",
+    "cac ban",
+    "mọi người",
+    "moi nguoi",
+    "khán giả",
+    "khan gia",
 }
+GENERIC_AUDIENCE_IDS = {
+    "audience",
+    "general humanity",
+    "general audience",
+    "viewer",
+    "viewers",
+    "public",
+    "nguoi xem",
+    "khan gia",
+}
+GENERIC_AUDIENCE_ROLES = {"audience"}
 
 
 @dataclass(slots=True, frozen=True)
@@ -96,14 +124,61 @@ def _extract_pronoun_terms(text: str) -> set[str]:
     return {term for term in COMMON_VI_PRONOUNS if f" {term} " in normalized}
 
 
+def _primary_listener_payload(row: object) -> dict[str, object]:
+    listeners = _row_value(row, "listeners_json", []) or []
+    if isinstance(listeners, list) and listeners:
+        primary_listener = listeners[0] or {}
+        if isinstance(primary_listener, dict):
+            return primary_listener
+    return {}
+
+
 def _pair_key(row: object) -> tuple[str, str]:
     speaker = _row_value(row, "speaker_json", {}) or {}
-    listeners = _row_value(row, "listeners_json", []) or []
+    primary_listener = _primary_listener_payload(row)
     speaker_id = str((speaker or {}).get("character_id", "unknown"))
-    primary_listener = "unknown"
-    if isinstance(listeners, list) and listeners:
-        primary_listener = str((listeners[0] or {}).get("character_id", "unknown"))
-    return speaker_id, primary_listener
+    listener_id = str(primary_listener.get("character_id", "unknown") or "unknown")
+    return speaker_id, listener_id
+
+
+def _is_generic_audience_listener(listener: dict[str, object]) -> bool:
+    if not listener:
+        return False
+    listener_role = _normalize_text(str(listener.get("role", "") or ""))
+    listener_id = _normalize_text(str(listener.get("character_id", "") or ""))
+    return listener_role in GENERIC_AUDIENCE_ROLES or listener_id in GENERIC_AUDIENCE_IDS
+
+
+def _is_narration_like(row: object) -> bool:
+    speaker = _row_value(row, "speaker_json", {}) or {}
+    speaker_source = _normalize_text(str((speaker or {}).get("source", "") or ""))
+    if speaker_source == "narration":
+        return True
+    return _is_generic_audience_listener(_primary_listener_payload(row))
+
+
+def _effective_honorific_terms(
+    row: object,
+    *,
+    honorific_policy: dict[str, object],
+    subtitle_text: str,
+    tts_text: str,
+) -> tuple[str, str]:
+    self_term = str(honorific_policy.get("self_term", "") or "").strip()
+    address_term = str(honorific_policy.get("address_term", "") or "").strip()
+    if not (self_term or address_term):
+        return self_term, address_term
+    if not _is_narration_like(row):
+        return self_term, address_term
+    subtitle_has_policy = (self_term and _contains_term(subtitle_text, self_term)) or (
+        address_term and _contains_term(subtitle_text, address_term)
+    )
+    tts_has_policy = (self_term and _contains_term(tts_text, self_term)) or (
+        address_term and _contains_term(tts_text, address_term)
+    )
+    if subtitle_has_policy or tts_has_policy:
+        return self_term, address_term
+    return "", ""
 
 
 def _relation_status_is_locked(status: object) -> bool:
@@ -139,8 +214,13 @@ def analyze_segment_analyses(
         overall_confidence = float(confidence.get("overall", 0.0) or 0.0)
         ellipsis_confidence = float(resolved_ellipsis.get("confidence", 0.0) or 0.0)
 
-        self_term = str(honorific_policy.get("self_term", "") or "").strip()
-        address_term = str(honorific_policy.get("address_term", "") or "").strip()
+        narration_like = _is_narration_like(row)
+        self_term, address_term = _effective_honorific_terms(
+            row,
+            honorific_policy=honorific_policy,
+            subtitle_text=subtitle_text,
+            tts_text=tts_text,
+        )
         weak_listener_evidence = listener_confidence < 0.5 or "listener_ambiguous" in risk_flags
         weak_discourse_evidence = min(speaker_confidence, max(listener_confidence, ellipsis_confidence)) < 0.55
 
@@ -151,7 +231,7 @@ def analyze_segment_analyses(
                     segment_index=segment_index,
                     code="low_confidence_gate",
                     severity="error",
-                    message="Confidence tổng thể thấp, cần review trước khi TTS/export.",
+                    message="Confidence tong the thap, can review truoc khi TTS/export.",
                 )
             )
 
@@ -162,7 +242,7 @@ def analyze_segment_analyses(
                     segment_index=segment_index,
                     code="addressee_mismatch",
                     severity="warning",
-                    message="Đã chèn xưng hô nhưng người nghe còn mơ hồ.",
+                    message="Da chen xung ho nhung nguoi nghe con mo ho.",
                 )
             )
 
@@ -173,20 +253,30 @@ def analyze_segment_analyses(
                     segment_index=segment_index,
                     code="pronoun_without_evidence",
                     severity="warning",
-                    message="Đã chèn ngôi xưng hô khi bằng chứng discourse còn yếu.",
+                    message="Da chen ngoi xung ho khi bang chung discourse con yeu.",
                 )
             )
 
         subtitle_pronouns = _extract_pronoun_terms(subtitle_text)
         tts_pronouns = _extract_pronoun_terms(tts_text)
-        if subtitle_pronouns and tts_pronouns and subtitle_pronouns != tts_pronouns:
+        if narration_like and subtitle_pronouns != tts_pronouns and (subtitle_pronouns or tts_pronouns):
             issues.append(
                 SemanticQcIssue(
                     segment_id=segment_id,
                     segment_index=segment_index,
                     code="sub_tts_pronoun_divergence",
                     severity="error",
-                    message="Phụ đề và lời TTS đang dùng ngôi xưng hô khác nhau.",
+                    message="Thuyet minh dang lech cach goi khan gia/xung ho giua subtitle va TTS.",
+                )
+            )
+        elif subtitle_pronouns and tts_pronouns and subtitle_pronouns != tts_pronouns:
+            issues.append(
+                SemanticQcIssue(
+                    segment_id=segment_id,
+                    segment_index=segment_index,
+                    code="sub_tts_pronoun_divergence",
+                    severity="error",
+                    message="Phu de va loi TTS dang dung ngoi xung ho khac nhau.",
                 )
             )
         elif self_term and address_term:
@@ -194,7 +284,7 @@ def analyze_segment_analyses(
             tts_has_policy = _contains_term(tts_text, self_term) or _contains_term(tts_text, address_term)
             if sub_has_policy != tts_has_policy:
                 unsafe_tts_only_injection = tts_has_policy and not sub_has_policy and (
-                    weak_listener_evidence or weak_discourse_evidence
+                    weak_listener_evidence or weak_discourse_evidence or narration_like
                 )
                 issues.append(
                     SemanticQcIssue(
@@ -203,9 +293,9 @@ def analyze_segment_analyses(
                         code="sub_tts_pronoun_divergence",
                         severity="error" if unsafe_tts_only_injection else "warning",
                         message=(
-                            "Lời TTS đang tự thêm xưng hô khi bằng chứng người nghe/discourse còn yếu."
+                            "Loi TTS dang tu them xung ho khi bang chung nguoi nghe/discourse con yeu."
                             if unsafe_tts_only_injection
-                            else "Phụ đề và lời TTS chưa bám cùng policy xưng hô."
+                            else "Phu de va loi TTS chua bam cung policy xung ho."
                         ),
                     )
                 )
@@ -222,7 +312,7 @@ def analyze_segment_analyses(
                         segment_index=segment_index,
                         code="honorific_drift",
                         severity="error",
-                        message="Cặp speaker/listener này đang trôi xưng hô trong cùng scene.",
+                        message="Cap speaker/listener nay dang troi xung ho trong cung scene.",
                     )
                 )
             previous_policy_by_pair[pair_key] = policy_signature
@@ -248,9 +338,9 @@ def analyze_segment_analyses(
                         code="directionality_mismatch",
                         severity="error" if relation_status_locked else "warning",
                         message=(
-                            "Xưng hô tự xưng không khớp relation memory đã khóa/xác nhận."
+                            "Xung ho tu xung khong khop relation memory da khoa/xac nhan."
                             if relation_status_locked
-                            else "Xưng hô tự xưng không khớp relation memory hiện có."
+                            else "Xung ho tu xung khong khop relation memory hien co."
                         ),
                     )
                 )
@@ -267,9 +357,9 @@ def analyze_segment_analyses(
                         code="directionality_mismatch",
                         severity="error" if relation_status_locked else "warning",
                         message=(
-                            "Xưng hô gọi người nghe không khớp relation memory đã khóa/xác nhận."
+                            "Xung ho goi nguoi nghe khong khop relation memory da khoa/xac nhan."
                             if relation_status_locked
-                            else "Xưng hô gọi người nghe không khớp relation memory hiện có."
+                            else "Xung ho goi nguoi nghe khong khop relation memory hien co."
                         ),
                     )
                 )

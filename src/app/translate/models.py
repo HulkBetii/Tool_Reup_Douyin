@@ -210,6 +210,30 @@ class SemanticBatchOutput(BaseModel):
     items: list[SegmentSemanticAnalysisItem]
 
 
+class NarrationSemanticAnalysisItem(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    speaker: SpeakerDecision
+    listeners: list[ListenerDecision] = Field(default_factory=list)
+    turn_function: str = "statement"
+    register_data: RegisterDecision = Field(alias="register")
+    resolved_ellipsis: ResolvedEllipsis = Field(default_factory=ResolvedEllipsis)
+    honorific_policy: HonorificPolicy = Field(default_factory=HonorificPolicy)
+    semantic_translation: str
+    glossary_hits: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    confidence: ConfidenceBreakdown = Field(default_factory=ConfidenceBreakdown)
+    needs_human_review: bool = False
+    review_reason_codes: list[str] = Field(default_factory=list)
+    review_question: str = ""
+
+
+class NarrationSemanticBatchOutput(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    items: list[NarrationSemanticAnalysisItem]
+
+
 class DialogueAdaptationItem(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
@@ -226,6 +250,23 @@ class DialogueAdaptationBatchOutput(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
     items: list[DialogueAdaptationItem]
+
+
+class NarrationAdaptationItem(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    honorific_policy: HonorificPolicy = Field(default_factory=HonorificPolicy)
+    subtitle_text: str
+    tts_text: str
+    risk_flags: list[str] = Field(default_factory=list)
+    needs_human_review: bool = False
+    review_reason_codes: list[str] = Field(default_factory=list)
+
+
+class NarrationAdaptationBatchOutput(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    items: list[NarrationAdaptationItem]
 
 
 class SemanticCriticIssue(BaseModel):
@@ -251,3 +292,45 @@ class SemanticCriticBatchOutput(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
     items: list[SemanticCriticItem]
+
+
+class SceneRouteDecision(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    scene_id: str
+    scene_index: int
+    route_mode: str
+    prompt_family_id: str
+    narration_score: float
+    speaker_dominance: float = 0.0
+    speaker_switch_density: float = 0.0
+    question_density: float = 0.0
+    vocative_density: float = 0.0
+    backchannel_density: float = 0.0
+    short_utterance_ratio: float = 0.0
+    long_sentence_ratio: float = 0.0
+    prior_review_penalty: float = 0.0
+    fallback_reason: str = ""
+
+
+class LLMCallMetric(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    role: str
+    route_mode: str
+    scene_id: str = ""
+    batch_index: int | None = None
+    batch_count: int | None = None
+    prompt_cache_key: str = ""
+    input_token_count: int | None = None
+    output_token_count: int | None = None
+
+
+class ContextualRunMetrics(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    llm_call_count: int = 0
+    llm_retry_count: int = 0
+    batch_count: int = 0
+    narration_batch_size_caps: dict[str, int] = Field(default_factory=dict)
+    call_metrics: list[LLMCallMetric] = Field(default_factory=list)

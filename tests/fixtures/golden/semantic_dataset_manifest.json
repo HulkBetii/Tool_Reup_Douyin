@@ -124,6 +124,60 @@
       }
     },
     {
+      "fixture_id": "zh-vi-narration-stale-honorific-policy-safe",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "narration_stale_honorific_policy_safe",
+      "expected_outcome": "safe",
+      "path": "tests/fixtures/golden/zh-vi-narration-stale-honorific-policy-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "honorific_drift",
+          "addressee_mismatch",
+          "pronoun_without_evidence",
+          "sub_tts_pronoun_divergence"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-narration-audience-address-injection",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "narration_tts_only_audience_address_injection",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-narration-audience-address-injection.json",
+      "expected": {
+        "error_count": 1,
+        "warning_count": 0,
+        "required_codes": [
+          "sub_tts_pronoun_divergence"
+        ],
+        "forbidden_codes": [
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
+      "fixture_id": "zh-vi-narration-geology-term-reviewed-safe",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "narration_geology_term_reviewed_safe",
+      "expected_outcome": "safe",
+      "path": "tests/fixtures/golden/zh-vi-narration-geology-term-reviewed-safe.json",
+      "expected": {
+        "error_count": 0,
+        "warning_count": 0,
+        "required_codes": [],
+        "forbidden_codes": [
+          "pronoun_without_evidence",
+          "addressee_mismatch",
+          "sub_tts_pronoun_divergence",
+          "honorific_drift",
+          "low_confidence_gate"
+        ]
+      }
+    },
+    {
       "fixture_id": "zh-vi-locked-relation-allowed-alternates-safe",
       "source_run": "manual-contract",
       "class": "locked_relation_allowed_alternates_safe",

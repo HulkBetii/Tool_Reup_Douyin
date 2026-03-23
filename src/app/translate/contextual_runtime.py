@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict
 from sqlite3 import Row
@@ -11,26 +12,51 @@ from pydantic import ValidationError
 from app.core.jobs import JobContext
 from app.project.database import ProjectDatabase
 from app.project.models import CharacterProfileRecord, RelationshipProfileRecord, SceneMemoryRecord, SegmentAnalysisRecord
+from app.project.profiles import load_project_profile_state
 from app.translate.relationship_memory import clone_allowed_alternates
 
 from .contextual_pipeline import (
+    CONTEXTUAL_STAGE_BATCH_SIZE,
     _build_context_payload,
     _build_glossary_payload,
     _character_record_from_seed,
     _chunk_scene_segments,
     _relationship_defaults_map,
     _relationship_record_from_seed,
+    _scene_batch_payload,
     _scene_record_from_output,
     _scene_row_payload,
-    _scene_batch_payload,
     _utc_now_iso,
     _validate_stage_item_ids,
 )
-from .models import TranslationPromptTemplate
+from .models import (
+    ContextualRunMetrics,
+    DialogueAdaptationBatchOutput,
+    NarrationAdaptationBatchOutput,
+    NarrationSemanticBatchOutput,
+    ScenePlannerOutput,
+    SceneRouteDecision,
+    SemanticBatchOutput,
+    TranslationPromptTemplate,
+)
 from .openai_engine import OpenAITranslationEngine
-from .presets import resolve_prompt_family
+from .presets import is_narration_fast_template, load_prompt_template, resolve_prompt_family
 from .scene_chunker import chunk_segments_into_scenes
 from .semantic_qc import analyze_segment_analyses
+
+NARRATION_FAST_BATCH_SIZE = 16
+NARRATION_ROUTE_HIGH_CONFIDENCE = 0.75
+NARRATION_ROUTE_LOW_CONFIDENCE = 0.45
+_ROUTING_REVIEW_CODES = {
+    "uncertain_speaker",
+    "uncertain_listener",
+    "unclear_relationship",
+    "unclear_context",
+    "ambiguous_reference",
+    "ambiguous_object_reference",
+}
+_VOCATIVE_PATTERN = re.compile(r"(各位|大家|朋友们|兄弟们|姐妹们|先生们|女士们|同学们|孩子们|观众朋友们)")
+_BACKCHANNEL_PATTERN = re.compile(r"^(嗯|啊|哦|诶|欸|哎|呀|唉|好|行|对|是啊|对啊|嗯嗯)[！!。.\s]*$")
 
 
 def _normalize_review_reason_code(raw_code: str) -> str:
@@ -40,9 +66,7 @@ def _normalize_review_reason_code(raw_code: str) -> str:
     lowered = text.lower()
     if "speaker" in lowered and ("uncertain" in lowered or "ambiguous" in lowered):
         return "uncertain_speaker"
-    if ("listener" in lowered or "addressee" in lowered) and (
-        "uncertain" in lowered or "ambiguous" in lowered
-    ):
+    if ("listener" in lowered or "addressee" in lowered) and ("uncertain" in lowered or "ambiguous" in lowered):
         return "uncertain_listener"
     if "damage" in lowered:
         return "ambiguous_damage_description"
@@ -58,21 +82,150 @@ def _normalize_review_reason_code(raw_code: str) -> str:
     return normalized or "unspecified_review_reason"
 
 
+def _build_narration_fast_scene_plan(scene) -> ScenePlannerOutput:
+    lead_text = str(scene.segments[0]["source_text"] or "").strip() if scene.segments else ""
+    short_lead = lead_text[:96] + ("..." if len(lead_text) > 96 else "")
+    summary = f"Narration fast path scene with {len(scene.segments)} segments. Lead: {short_lead or 'narration batch'}"
+    return ScenePlannerOutput(
+        scene_id=scene.scene_id,
+        scene_summary=summary,
+        participants=[],
+        recent_turn_digest=short_lead,
+        open_ambiguities=[],
+        unresolved_references=[],
+        character_updates=[],
+        relationship_updates=[],
+    )
+
+
+def _safe_ratio(numerator: float, denominator: float) -> float:
+    if denominator <= 0:
+        return 0.0
+    return max(0.0, min(1.0, numerator / denominator))
+
+
+def _is_short_utterance(text: str) -> bool:
+    return len(text.strip()) <= 12
+
+
+def _is_long_sentence(text: str) -> bool:
+    normalized = text.strip()
+    return len(normalized) >= 24 or normalized.count("，") + normalized.count(",") >= 2
+
+
+def _prior_review_penalty(scene, prior_analysis_rows: dict[str, dict[str, object]]) -> float:
+    flagged = 0
+    for row in scene.segments:
+        analysis_row = prior_analysis_rows.get(str(row["segment_id"]))
+        if not analysis_row:
+            continue
+        raw_codes = analysis_row.get("review_reason_codes_json") or []
+        if isinstance(raw_codes, str):
+            try:
+                raw_codes = json.loads(raw_codes)
+            except Exception:
+                raw_codes = []
+        normalized_codes = {_normalize_review_reason_code(str(item)) for item in raw_codes}
+        if normalized_codes & _ROUTING_REVIEW_CODES:
+            flagged += 1
+    return _safe_ratio(flagged, len(scene.segments))
+
+
+def _speaker_metrics_for_scene(scene, prior_analysis_rows: dict[str, dict[str, object]]) -> tuple[float, float]:
+    speaker_keys: list[str] = []
+    for row in scene.segments:
+        analysis_row = prior_analysis_rows.get(str(row["segment_id"]))
+        if not analysis_row:
+            continue
+        speaker_json = analysis_row.get("speaker_json") or {}
+        if isinstance(speaker_json, str):
+            try:
+                speaker_json = json.loads(speaker_json)
+            except Exception:
+                speaker_json = {}
+        speaker_key = str((speaker_json or {}).get("character_id") or "").strip().lower()
+        if speaker_key and speaker_key != "unknown":
+            speaker_keys.append(speaker_key)
+    if not speaker_keys:
+        return 0.6, 0.5
+    dominance = max(speaker_keys.count(key) for key in set(speaker_keys)) / len(speaker_keys)
+    if len(speaker_keys) <= 1:
+        return max(0.0, min(1.0, dominance)), 0.0
+    switches = sum(1 for left, right in zip(speaker_keys, speaker_keys[1:]) if left != right)
+    return max(0.0, min(1.0, dominance)), _safe_ratio(switches, len(speaker_keys) - 1)
+
+
+def _route_scene(
+    scene,
+    *,
+    prior_analysis_rows: dict[str, dict[str, object]],
+    narration_family_id: str,
+    dialogue_family_id: str,
+    prefer_narration: bool = False,
+) -> SceneRouteDecision:
+    texts = [str(row["source_text"] or "").strip() for row in scene.segments]
+    nonempty_texts = [text for text in texts if text]
+    total = max(1, len(nonempty_texts))
+    speaker_dominance, speaker_switch_density = _speaker_metrics_for_scene(scene, prior_analysis_rows)
+    question_density = _safe_ratio(sum(1 for text in nonempty_texts if "?" in text or "？" in text), total)
+    vocative_density = _safe_ratio(sum(1 for text in nonempty_texts if _VOCATIVE_PATTERN.search(text)), total)
+    backchannel_density = _safe_ratio(sum(1 for text in nonempty_texts if _BACKCHANNEL_PATTERN.match(text)), total)
+    short_utterance_ratio = _safe_ratio(sum(1 for text in nonempty_texts if _is_short_utterance(text)), total)
+    long_sentence_ratio = _safe_ratio(sum(1 for text in nonempty_texts if _is_long_sentence(text)), total)
+    prior_penalty = _prior_review_penalty(scene, prior_analysis_rows)
+    narration_score = (
+        0.32 * speaker_dominance
+        + 0.18 * (1.0 - speaker_switch_density)
+        + 0.18 * long_sentence_ratio
+        + 0.10 * (1.0 - short_utterance_ratio)
+        + 0.08 * (1.0 - question_density)
+        + 0.06 * (1.0 - vocative_density)
+        + 0.05 * (1.0 - backchannel_density)
+        - 0.15 * prior_penalty
+    )
+    if prefer_narration:
+        narration_score += 0.2
+        if (
+            question_density == 0.0
+            and vocative_density == 0.0
+            and backchannel_density == 0.0
+            and prior_penalty == 0.0
+            and speaker_switch_density <= 0.5
+        ):
+            narration_score = max(narration_score, 0.76)
+    narration_score = max(0.0, min(1.0, narration_score))
+    route_mode = "dialogue"
+    prompt_family_id = dialogue_family_id
+    fallback_reason = ""
+    if narration_score >= NARRATION_ROUTE_HIGH_CONFIDENCE:
+        route_mode = "narration_fast"
+        prompt_family_id = narration_family_id
+    elif narration_score > NARRATION_ROUTE_LOW_CONFIDENCE:
+        fallback_reason = "borderline_narration_score"
+    return SceneRouteDecision(
+        scene_id=scene.scene_id,
+        scene_index=scene.scene_index,
+        route_mode=route_mode,
+        prompt_family_id=prompt_family_id,
+        narration_score=round(narration_score, 4),
+        speaker_dominance=round(speaker_dominance, 4),
+        speaker_switch_density=round(speaker_switch_density, 4),
+        question_density=round(question_density, 4),
+        vocative_density=round(vocative_density, 4),
+        backchannel_density=round(backchannel_density, 4),
+        short_utterance_ratio=round(short_utterance_ratio, 4),
+        long_sentence_ratio=round(long_sentence_ratio, 4),
+        prior_review_penalty=round(prior_penalty, 4),
+        fallback_reason=fallback_reason,
+    )
+
+
 def _is_retryable_stage_exception(exc: Exception) -> bool:
     if isinstance(exc, ValidationError):
         return True
     if isinstance(exc, RuntimeError):
         message = " ".join(str(part) for part in exc.args).lower()
-        return any(
-            marker in message
-            for marker in (
-                "model khong tra ve du lieu co parse duoc",
-                "invalid json",
-                "json_invalid",
-                "unexpected end",
-                "eof while parsing",
-            )
-        )
+        return any(marker in message for marker in ("model khong tra ve du lieu co parse duoc", "invalid json", "json_invalid", "unexpected end", "eof while parsing"))
     return False
 
 
@@ -93,6 +246,7 @@ def _retry_stage_batch_with_split(
     batch_count: int,
     stage_runner: Callable[[list[Row], int, int], Any],
     reason: str,
+    on_retry: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     midpoint = max(1, len(batch_rows) // 2)
     left_rows = batch_rows[:midpoint]
@@ -107,6 +261,8 @@ def _retry_stage_batch_with_split(
         len(left_rows),
         len(right_rows),
     )
+    if on_retry is not None:
+        on_retry()
     merged_items = _run_stage_batch_with_retry(
         context=context,
         stage_label=stage_label,
@@ -115,6 +271,7 @@ def _retry_stage_batch_with_split(
         batch_index=batch_index,
         batch_count=batch_count,
         stage_runner=stage_runner,
+        on_retry=on_retry,
     )
     if right_rows:
         merged_items.update(
@@ -126,6 +283,7 @@ def _retry_stage_batch_with_split(
                 batch_index=batch_index,
                 batch_count=batch_count,
                 stage_runner=stage_runner,
+                on_retry=on_retry,
             )
         )
     return merged_items
@@ -140,6 +298,7 @@ def _run_stage_batch_with_retry(
     batch_index: int,
     batch_count: int,
     stage_runner: Callable[[list[Row], int, int], Any],
+    on_retry: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     context.cancellation_token.raise_if_canceled()
     try:
@@ -156,6 +315,7 @@ def _run_stage_batch_with_retry(
             batch_count=batch_count,
             stage_runner=stage_runner,
             reason=_summarize_retryable_stage_exception(exc),
+            on_retry=on_retry,
         )
     batch_items = {item.segment_id: item for item in output.items}
     try:
@@ -180,6 +340,147 @@ def _run_stage_batch_with_retry(
             batch_count=batch_count,
             stage_runner=stage_runner,
             reason="mismatched segment ids",
+            on_retry=on_retry,
+        )
+
+
+def _retry_stage_batch_with_split_positional(
+    *,
+    context: JobContext,
+    stage_label: str,
+    scene_id: str,
+    batch_rows: list[Row],
+    batch_index: int,
+    batch_count: int,
+    stage_runner: Callable[[list[Row], int, int], Any],
+    reason: str,
+    on_retry: Callable[[], None] | None = None,
+    on_backoff: Callable[[int], None] | None = None,
+) -> dict[str, Any]:
+    midpoint = max(1, len(batch_rows) // 2)
+    left_rows = batch_rows[:midpoint]
+    right_rows = batch_rows[midpoint:]
+    context.logger.warning(
+        "%s failed for scene=%s batch=%s/%s (%s). Retrying with smaller positional batches (%s + %s).",
+        stage_label,
+        scene_id,
+        batch_index,
+        batch_count,
+        reason,
+        len(left_rows),
+        len(right_rows),
+    )
+    if on_retry is not None:
+        on_retry()
+    if on_backoff is not None:
+        on_backoff(midpoint)
+    merged_items = _run_stage_batch_with_positional_retry(
+        context=context,
+        stage_label=stage_label,
+        scene_id=scene_id,
+        batch_rows=left_rows,
+        batch_index=batch_index,
+        batch_count=batch_count,
+        stage_runner=stage_runner,
+        on_retry=on_retry,
+        on_backoff=on_backoff,
+    )
+    if right_rows:
+        merged_items.update(
+            _run_stage_batch_with_positional_retry(
+                context=context,
+                stage_label=stage_label,
+                scene_id=scene_id,
+                batch_rows=right_rows,
+                batch_index=batch_index,
+                batch_count=batch_count,
+                stage_runner=stage_runner,
+                on_retry=on_retry,
+                on_backoff=on_backoff,
+            )
+        )
+    return merged_items
+
+
+def _run_stage_batch_with_positional_retry(
+    *,
+    context: JobContext,
+    stage_label: str,
+    scene_id: str,
+    batch_rows: list[Row],
+    batch_index: int,
+    batch_count: int,
+    stage_runner: Callable[[list[Row], int, int], Any],
+    on_retry: Callable[[], None] | None = None,
+    on_backoff: Callable[[int], None] | None = None,
+) -> dict[str, Any]:
+    context.cancellation_token.raise_if_canceled()
+    same_batch_retry_used = False
+    while True:
+        try:
+            output = stage_runner(batch_rows, batch_index, batch_count)
+        except Exception as exc:
+            if _is_retryable_stage_exception(exc) and not same_batch_retry_used:
+                same_batch_retry_used = True
+                if on_retry is not None:
+                    on_retry()
+                context.logger.warning(
+                    "%s parse/schema issue for scene=%s batch=%s/%s (%s). Retrying same positional batch once.",
+                    stage_label,
+                    scene_id,
+                    batch_index,
+                    batch_count,
+                    _summarize_retryable_stage_exception(exc),
+                )
+                continue
+            if len(batch_rows) <= 1 or not _is_retryable_stage_exception(exc):
+                raise
+            return _retry_stage_batch_with_split_positional(
+                context=context,
+                stage_label=stage_label,
+                scene_id=scene_id,
+                batch_rows=batch_rows,
+                batch_index=batch_index,
+                batch_count=batch_count,
+                stage_runner=stage_runner,
+                reason=_summarize_retryable_stage_exception(exc),
+                on_retry=on_retry,
+                on_backoff=on_backoff,
+            )
+        actual_len = len(getattr(output, "items", []))
+        expected_len = len(batch_rows)
+        if actual_len == expected_len:
+            return {str(row["segment_id"]): item for row, item in zip(batch_rows, output.items, strict=True)}
+        mismatch_reason = f"positional length mismatch (expected={expected_len} actual={actual_len})"
+        if not same_batch_retry_used:
+            same_batch_retry_used = True
+            if on_retry is not None:
+                on_retry()
+            context.logger.warning(
+                "%s length mismatch for scene=%s batch=%s/%s (%s). Retrying same positional batch once.",
+                stage_label,
+                scene_id,
+                batch_index,
+                batch_count,
+                mismatch_reason,
+            )
+            continue
+        if len(batch_rows) <= 1:
+            raise RuntimeError(
+                f"{stage_label} positional output mismatch (scene={scene_id}, batch={batch_index}/{batch_count}): "
+                f"{mismatch_reason}"
+            )
+        return _retry_stage_batch_with_split_positional(
+            context=context,
+            stage_label=stage_label,
+            scene_id=scene_id,
+            batch_rows=batch_rows,
+            batch_index=batch_index,
+            batch_count=batch_count,
+            stage_runner=stage_runner,
+            reason=mismatch_reason,
+            on_retry=on_retry,
+            on_backoff=on_backoff,
         )
 
 
@@ -195,14 +496,55 @@ def run_contextual_translation(
     target_language: str,
     model: str,
 ) -> dict[str, object]:
-    prompt_family = resolve_prompt_family(workspace.root_dir, selected_template)
-    required_roles = {"scene_planner", "semantic_pass", "dialogue_adaptation"}
-    missing_roles = sorted(required_roles - set(prompt_family))
-    if missing_roles:
-        raise RuntimeError(f"Thiếu contextual prompt roles: {', '.join(missing_roles)}")
+    selected_prompt_family = resolve_prompt_family(workspace.root_dir, selected_template)
+    profile_state = load_project_profile_state(workspace.root_dir)
+    project_profile_id = profile_state.project_profile_id if profile_state is not None else None
+    narration_routing_enabled = is_narration_fast_template(selected_template) or bool(
+        project_profile_id and project_profile_id.startswith("zh-vi-narration-")
+    )
+    narration_prompt_family = resolve_prompt_family(
+        workspace.root_dir,
+        load_prompt_template(workspace.root_dir, "contextual_narration_fast_adaptation"),
+    )
+    dialogue_prompt_family = (
+        resolve_prompt_family(
+            workspace.root_dir,
+            load_prompt_template(workspace.root_dir, "contextual_default_adaptation"),
+        )
+        if narration_routing_enabled
+        else selected_prompt_family
+    )
+    for family_name, family, required_roles in (
+        ("selected", selected_prompt_family, {"semantic_pass", "dialogue_adaptation"}),
+        ("narration", narration_prompt_family, {"semantic_pass", "dialogue_adaptation"}),
+        ("dialogue", dialogue_prompt_family, {"scene_planner", "semantic_pass", "dialogue_adaptation"}),
+    ):
+        missing_roles = sorted(required_roles - set(family))
+        if missing_roles:
+            raise RuntimeError(f"Thiếu contextual prompt roles trong {family_name} family: {', '.join(missing_roles)}")
 
     scenes = chunk_segments_into_scenes(segments)
     now = _utc_now_iso()
+    prior_analysis_rows = {
+        str(row["segment_id"]): dict(row)
+        for row in database.list_segment_analyses(workspace.project_id)
+    }
+    route_decisions: list[SceneRouteDecision] = []
+    metrics = ContextualRunMetrics()
+    narration_semantic_batch_cap = NARRATION_FAST_BATCH_SIZE
+    narration_adaptation_batch_cap = NARRATION_FAST_BATCH_SIZE
+    metrics.narration_batch_size_caps = {
+        "semantic_pass": narration_semantic_batch_cap,
+        "dialogue_adaptation": narration_adaptation_batch_cap,
+    }
+
+    def _record_call(metric) -> None:
+        metrics.llm_call_count += 1
+        metrics.call_metrics.append(metric)
+
+    def _count_retry() -> None:
+        metrics.llm_retry_count += 1
+
     scene_records: list[SceneMemoryRecord] = []
     character_profiles: dict[str, CharacterProfileRecord] = {
         str(row["character_id"]): CharacterProfileRecord(
@@ -255,35 +597,83 @@ def run_contextual_translation(
 
     total_scenes = max(1, len(scenes))
     for scene_position, scene in enumerate(scenes, start=1):
+        if narration_routing_enabled:
+            route_decision = _route_scene(
+                scene,
+                prior_analysis_rows=prior_analysis_rows,
+                narration_family_id=narration_prompt_family["dialogue_adaptation"].family_id
+                or narration_prompt_family["dialogue_adaptation"].template_id,
+                dialogue_family_id=dialogue_prompt_family["dialogue_adaptation"].family_id
+                or dialogue_prompt_family["dialogue_adaptation"].template_id,
+                prefer_narration=is_narration_fast_template(selected_template),
+            )
+        else:
+            route_mode = "narration_fast" if is_narration_fast_template(selected_template) else "dialogue"
+            route_decision = SceneRouteDecision(
+                scene_id=scene.scene_id,
+                scene_index=scene.scene_index,
+                route_mode=route_mode,
+                prompt_family_id=selected_template.family_id or selected_template.template_id,
+                narration_score=1.0 if route_mode == "narration_fast" else 0.0,
+                speaker_dominance=0.6 if route_mode == "narration_fast" else 0.0,
+                speaker_switch_density=0.5 if route_mode == "narration_fast" else 1.0,
+                question_density=0.0,
+                vocative_density=0.0,
+                backchannel_density=0.0,
+                short_utterance_ratio=0.0,
+                long_sentence_ratio=0.0,
+                prior_review_penalty=0.0,
+                fallback_reason="",
+            )
+        route_decisions.append(route_decision)
+        scene_route_mode = route_decision.route_mode
+        scene_is_narration_fast = scene_route_mode == "narration_fast"
+        active_prompt_family = narration_prompt_family if scene_is_narration_fast else dialogue_prompt_family
         context.report_progress(
             min(20, int(scene_position * 20 / total_scenes)),
-            f"Contextual V2: scene {scene_position}/{total_scenes}",
-        )
-        planner_output = engine.plan_scene(
-            context,
-            template=prompt_family["scene_planner"],
-            scene_payload=_scene_row_payload(scene),
-            source_language=source_language,
-            target_language=target_language,
-            context_payload=_build_context_payload(
-                scene=scene,
-                existing_character_rows=list(character_profiles.values()),
-                existing_relationship_rows=list(relationship_profiles.values()),
+            (
+                f"Contextual V2 narration fast: scene {scene_position}/{total_scenes}"
+                if scene_is_narration_fast
+                else f"Contextual V2: scene {scene_position}/{total_scenes}"
             ),
-            glossary_payload=_build_glossary_payload(
-                database,
-                workspace.project_id,
-                relationship_rows=list(relationship_profiles.values()),
-            ),
-            model=model,
         )
+        planner_character_rows = [] if scene_is_narration_fast else list(character_profiles.values())
+        planner_relationship_rows = [] if scene_is_narration_fast else list(relationship_profiles.values())
+        if scene_is_narration_fast:
+            planner_output = _build_narration_fast_scene_plan(scene)
+        else:
+            metrics.batch_count += 1
+            planner_output = engine.plan_scene(
+                context,
+                template=active_prompt_family["scene_planner"],
+                scene_payload=_scene_row_payload(scene),
+                source_language=source_language,
+                target_language=target_language,
+                context_payload=_build_context_payload(
+                    scene=scene,
+                    existing_character_rows=planner_character_rows,
+                    existing_relationship_rows=planner_relationship_rows,
+                ),
+                glossary_payload=_build_glossary_payload(
+                    database,
+                    workspace.project_id,
+                    relationship_rows=planner_relationship_rows,
+                ),
+                model=model,
+                prompt_cache_key=OpenAITranslationEngine.build_prompt_cache_key(
+                    template=active_prompt_family["scene_planner"],
+                    model=model,
+                    source_language=source_language,
+                    target_language=target_language,
+                    route_mode=scene_route_mode,
+                    project_profile_id=project_profile_id,
+                ),
+                record_call=_record_call,
+                route_mode=scene_route_mode,
+            )
         scene_records.append(_scene_record_from_output(workspace.project_id, scene, planner_output, now=now))
         for seed in planner_output.character_updates:
-            character_profiles[seed.character_id] = _character_record_from_seed(
-                workspace.project_id,
-                seed,
-                now=now,
-            )
+            character_profiles[seed.character_id] = _character_record_from_seed(workspace.project_id, seed, now=now)
         for seed in planner_output.relationship_updates:
             relationship_profiles[seed.relationship_id] = _relationship_record_from_seed(
                 workspace.project_id,
@@ -291,21 +681,54 @@ def run_contextual_translation(
                 now=now,
                 scene_id=scene.scene_id,
             )
-
-        scene_batches = _chunk_scene_segments(scene.segments)
+        scene_context_character_rows = [] if scene_is_narration_fast else list(character_profiles.values())
+        scene_context_relationship_rows = [] if scene_is_narration_fast else list(relationship_profiles.values())
+        scene_batches = None
+        if not scene_is_narration_fast:
+            scene_batches = _chunk_scene_segments(
+                scene.segments,
+                batch_size=CONTEXTUAL_STAGE_BATCH_SIZE,
+            )
         semantic_items: dict[str, object] = {}
-        for batch_index, batch_rows in enumerate(scene_batches, start=1):
-            semantic_items.update(
-                _run_stage_batch_with_retry(
-                    context=context,
-                    stage_label="Semantic pass",
-                    scene_id=scene.scene_id,
-                    batch_rows=batch_rows,
-                    batch_index=batch_index,
-                    batch_count=len(scene_batches),
-                    stage_runner=lambda current_rows, current_batch_index, current_batch_count: engine.analyze_semantics(
+        semantic_output_model = NarrationSemanticBatchOutput if scene_is_narration_fast else SemanticBatchOutput
+        semantic_prompt_cache_key = OpenAITranslationEngine.build_prompt_cache_key(
+            template=active_prompt_family["semantic_pass"],
+            model=model,
+            source_language=source_language,
+            target_language=target_language,
+            route_mode=scene_route_mode,
+            project_profile_id=project_profile_id,
+        )
+        semantic_batch_count = 0
+        if scene_is_narration_fast:
+            scene_semantic_batch_cap = narration_semantic_batch_cap
+
+            def _downshift_semantic_batch_cap(recommended_size: int) -> None:
+                nonlocal narration_semantic_batch_cap, scene_semantic_batch_cap
+                reduced_size = max(1, min(scene_semantic_batch_cap, recommended_size))
+                if reduced_size >= scene_semantic_batch_cap:
+                    return
+                context.logger.info(
+                    "Narration semantic batch cap reduced for scene=%s from %s to %s after positional under-return.",
+                    scene.scene_id,
+                    scene_semantic_batch_cap,
+                    reduced_size,
+                )
+                scene_semantic_batch_cap = reduced_size
+                narration_semantic_batch_cap = min(narration_semantic_batch_cap, reduced_size)
+                metrics.narration_batch_size_caps["semantic_pass"] = narration_semantic_batch_cap
+
+            semantic_cursor = 0
+            while semantic_cursor < len(scene.segments):
+                current_batch_size = max(1, scene_semantic_batch_cap)
+                batch_rows = scene.segments[semantic_cursor : semantic_cursor + current_batch_size]
+                semantic_batch_count += 1
+                metrics.batch_count += 1
+
+                def semantic_runner(current_rows, current_batch_index, current_batch_count):
+                    return engine.analyze_semantics(
                         context,
-                        template=prompt_family["semantic_pass"],
+                        template=active_prompt_family["semantic_pass"],
                         batch_payload={
                             **_scene_batch_payload(
                                 scene,
@@ -320,40 +743,137 @@ def run_contextual_translation(
                         context_payload=_build_context_payload(
                             scene=scene,
                             planner_summary=planner_output.scene_summary,
-                            existing_character_rows=list(character_profiles.values()),
-                            existing_relationship_rows=list(relationship_profiles.values()),
+                            existing_character_rows=scene_context_character_rows,
+                            existing_relationship_rows=scene_context_relationship_rows,
                         ),
                         glossary_payload=_build_glossary_payload(
                             database,
                             workspace.project_id,
-                            relationship_rows=list(relationship_profiles.values()),
+                            relationship_rows=scene_context_relationship_rows,
                         ),
                         model=model,
-                    ),
+                        output_model=semantic_output_model,
+                        prompt_cache_key=semantic_prompt_cache_key,
+                        record_call=_record_call,
+                        route_mode=scene_route_mode,
+                    )
+
+                semantic_items.update(
+                    _run_stage_batch_with_positional_retry(
+                        context=context,
+                        stage_label="Semantic pass",
+                        scene_id=scene.scene_id,
+                        batch_rows=batch_rows,
+                        batch_index=semantic_batch_count,
+                        batch_count=max(1, math.ceil((len(scene.segments) - semantic_cursor) / current_batch_size)),
+                        stage_runner=semantic_runner,
+                        on_retry=_count_retry,
+                        on_backoff=_downshift_semantic_batch_cap,
+                    )
                 )
-            )
+                semantic_cursor += len(batch_rows)
+        else:
+            assert scene_batches is not None
+            semantic_batch_count = len(scene_batches)
+            for batch_index, batch_rows in enumerate(scene_batches, start=1):
+                metrics.batch_count += 1
+
+                def semantic_runner(current_rows, current_batch_index, current_batch_count):
+                    return engine.analyze_semantics(
+                        context,
+                        template=active_prompt_family["semantic_pass"],
+                        batch_payload={
+                            **_scene_batch_payload(
+                                scene,
+                                current_rows,
+                                batch_index=current_batch_index,
+                                batch_count=current_batch_count,
+                            ),
+                            "scene_plan": planner_output.model_dump(mode="json", by_alias=True),
+                        },
+                        source_language=source_language,
+                        target_language=target_language,
+                        context_payload=_build_context_payload(
+                            scene=scene,
+                            planner_summary=planner_output.scene_summary,
+                            existing_character_rows=scene_context_character_rows,
+                            existing_relationship_rows=scene_context_relationship_rows,
+                        ),
+                        glossary_payload=_build_glossary_payload(
+                            database,
+                            workspace.project_id,
+                            relationship_rows=scene_context_relationship_rows,
+                        ),
+                        model=model,
+                        output_model=semantic_output_model,
+                        prompt_cache_key=semantic_prompt_cache_key,
+                        record_call=_record_call,
+                        route_mode=scene_route_mode,
+                    )
+
+                semantic_items.update(
+                    _run_stage_batch_with_retry(
+                        context=context,
+                        stage_label="Semantic pass",
+                        scene_id=scene.scene_id,
+                        batch_rows=batch_rows,
+                        batch_index=batch_index,
+                        batch_count=len(scene_batches),
+                        stage_runner=semantic_runner,
+                        on_retry=_count_retry,
+                    )
+                )
         _validate_stage_item_ids(
             "Semantic pass",
             expected_ids=list(scene.segment_ids),
             actual_ids=list(semantic_items),
             scene_id=scene.scene_id,
-            batch_index=len(scene_batches),
-            batch_count=len(scene_batches),
+            batch_index=semantic_batch_count,
+            batch_count=semantic_batch_count,
         )
 
         adaptation_items: dict[str, object] = {}
-        for batch_index, batch_rows in enumerate(scene_batches, start=1):
-            adaptation_items.update(
-                _run_stage_batch_with_retry(
-                    context=context,
-                    stage_label="Dialogue adaptation",
-                    scene_id=scene.scene_id,
-                    batch_rows=batch_rows,
-                    batch_index=batch_index,
-                    batch_count=len(scene_batches),
-                    stage_runner=lambda current_rows, current_batch_index, current_batch_count: engine.adapt_dialogue(
+        adaptation_output_model = (
+            NarrationAdaptationBatchOutput if scene_is_narration_fast else DialogueAdaptationBatchOutput
+        )
+        adaptation_prompt_cache_key = OpenAITranslationEngine.build_prompt_cache_key(
+            template=active_prompt_family["dialogue_adaptation"],
+            model=model,
+            source_language=source_language,
+            target_language=target_language,
+            route_mode=scene_route_mode,
+            project_profile_id=project_profile_id,
+        )
+        adaptation_batch_count = 0
+        if scene_is_narration_fast:
+            scene_adaptation_batch_cap = narration_adaptation_batch_cap
+
+            def _downshift_adaptation_batch_cap(recommended_size: int) -> None:
+                nonlocal narration_adaptation_batch_cap, scene_adaptation_batch_cap
+                reduced_size = max(1, min(scene_adaptation_batch_cap, recommended_size))
+                if reduced_size >= scene_adaptation_batch_cap:
+                    return
+                context.logger.info(
+                    "Narration adaptation batch cap reduced for scene=%s from %s to %s after positional under-return.",
+                    scene.scene_id,
+                    scene_adaptation_batch_cap,
+                    reduced_size,
+                )
+                scene_adaptation_batch_cap = reduced_size
+                narration_adaptation_batch_cap = min(narration_adaptation_batch_cap, reduced_size)
+                metrics.narration_batch_size_caps["dialogue_adaptation"] = narration_adaptation_batch_cap
+
+            adaptation_cursor = 0
+            while adaptation_cursor < len(scene.segments):
+                current_batch_size = max(1, scene_adaptation_batch_cap)
+                batch_rows = scene.segments[adaptation_cursor : adaptation_cursor + current_batch_size]
+                adaptation_batch_count += 1
+                metrics.batch_count += 1
+
+                def adaptation_runner(current_rows, current_batch_index, current_batch_count):
+                    return engine.adapt_dialogue(
                         context,
-                        template=prompt_family["dialogue_adaptation"],
+                        template=active_prompt_family["dialogue_adaptation"],
                         batch_payload={
                             **_scene_batch_payload(
                                 scene,
@@ -372,30 +892,151 @@ def run_contextual_translation(
                         context_payload=_build_context_payload(
                             scene=scene,
                             planner_summary=planner_output.scene_summary,
-                            existing_character_rows=list(character_profiles.values()),
-                            existing_relationship_rows=list(relationship_profiles.values()),
+                            existing_character_rows=scene_context_character_rows,
+                            existing_relationship_rows=scene_context_relationship_rows,
                         ),
                         glossary_payload=_build_glossary_payload(
                             database,
                             workspace.project_id,
-                            relationship_rows=list(relationship_profiles.values()),
+                            relationship_rows=scene_context_relationship_rows,
                         ),
                         model=model,
-                    ),
+                        output_model=adaptation_output_model,
+                        prompt_cache_key=adaptation_prompt_cache_key,
+                        record_call=_record_call,
+                        route_mode=scene_route_mode,
+                    )
+
+                adaptation_items.update(
+                    _run_stage_batch_with_positional_retry(
+                        context=context,
+                        stage_label="Dialogue adaptation",
+                        scene_id=scene.scene_id,
+                        batch_rows=batch_rows,
+                        batch_index=adaptation_batch_count,
+                        batch_count=max(1, math.ceil((len(scene.segments) - adaptation_cursor) / current_batch_size)),
+                        stage_runner=adaptation_runner,
+                        on_retry=_count_retry,
+                        on_backoff=_downshift_adaptation_batch_cap,
+                    )
                 )
-            )
+                adaptation_cursor += len(batch_rows)
+        else:
+            assert scene_batches is not None
+            adaptation_batch_count = len(scene_batches)
+            for batch_index, batch_rows in enumerate(scene_batches, start=1):
+                metrics.batch_count += 1
+
+                def adaptation_runner(current_rows, current_batch_index, current_batch_count):
+                    return engine.adapt_dialogue(
+                        context,
+                        template=active_prompt_family["dialogue_adaptation"],
+                        batch_payload={
+                            **_scene_batch_payload(
+                                scene,
+                                current_rows,
+                                batch_index=current_batch_index,
+                                batch_count=current_batch_count,
+                            ),
+                            "scene_plan": planner_output.model_dump(mode="json", by_alias=True),
+                            "semantic_items": [
+                                semantic_items[str(row["segment_id"])].model_dump(mode="json", by_alias=True)
+                                for row in current_rows
+                            ],
+                        },
+                        source_language=source_language,
+                        target_language=target_language,
+                        context_payload=_build_context_payload(
+                            scene=scene,
+                            planner_summary=planner_output.scene_summary,
+                            existing_character_rows=scene_context_character_rows,
+                            existing_relationship_rows=scene_context_relationship_rows,
+                        ),
+                        glossary_payload=_build_glossary_payload(
+                            database,
+                            workspace.project_id,
+                            relationship_rows=scene_context_relationship_rows,
+                        ),
+                        model=model,
+                        output_model=adaptation_output_model,
+                        prompt_cache_key=adaptation_prompt_cache_key,
+                        record_call=_record_call,
+                        route_mode=scene_route_mode,
+                    )
+
+                adaptation_items.update(
+                    _run_stage_batch_with_retry(
+                        context=context,
+                        stage_label="Dialogue adaptation",
+                        scene_id=scene.scene_id,
+                        batch_rows=batch_rows,
+                        batch_index=batch_index,
+                        batch_count=len(scene_batches),
+                        stage_runner=adaptation_runner,
+                        on_retry=_count_retry,
+                    )
+                )
         _validate_stage_item_ids(
             "Dialogue adaptation",
             expected_ids=list(scene.segment_ids),
             actual_ids=list(adaptation_items),
             scene_id=scene.scene_id,
-            batch_index=len(scene_batches),
-            batch_count=len(scene_batches),
+            batch_index=adaptation_batch_count,
+            batch_count=adaptation_batch_count,
         )
 
         critic_items: dict[str, object] = {}
-        if "semantic_critic" in prompt_family:
+        if "semantic_critic" in active_prompt_family and not scene_is_narration_fast:
+            critic_prompt_cache_key = OpenAITranslationEngine.build_prompt_cache_key(
+                template=active_prompt_family["semantic_critic"],
+                model=model,
+                source_language=source_language,
+                target_language=target_language,
+                route_mode=scene_route_mode,
+                project_profile_id=project_profile_id,
+            )
             for batch_index, batch_rows in enumerate(scene_batches, start=1):
+                metrics.batch_count += 1
+                def critic_runner(current_rows, current_batch_index, current_batch_count):
+                    return engine.critique_dialogue(
+                        context,
+                        template=active_prompt_family["semantic_critic"],
+                        batch_payload={
+                            **_scene_batch_payload(
+                                scene,
+                                current_rows,
+                                batch_index=current_batch_index,
+                                batch_count=current_batch_count,
+                            ),
+                            "scene_plan": planner_output.model_dump(mode="json", by_alias=True),
+                            "semantic_items": [
+                                semantic_items[str(row["segment_id"])].model_dump(mode="json", by_alias=True)
+                                for row in current_rows
+                            ],
+                            "adaptation_items": [
+                                adaptation_items[str(row["segment_id"])].model_dump(mode="json", by_alias=True)
+                                for row in current_rows
+                            ],
+                        },
+                        source_language=source_language,
+                        target_language=target_language,
+                        context_payload=_build_context_payload(
+                            scene=scene,
+                            planner_summary=planner_output.scene_summary,
+                            existing_character_rows=scene_context_character_rows,
+                            existing_relationship_rows=scene_context_relationship_rows,
+                        ),
+                        glossary_payload=_build_glossary_payload(
+                            database,
+                            workspace.project_id,
+                            relationship_rows=scene_context_relationship_rows,
+                        ),
+                        model=model,
+                        prompt_cache_key=critic_prompt_cache_key,
+                        record_call=_record_call,
+                        route_mode=scene_route_mode,
+                    )
+
                 critic_items.update(
                     _run_stage_batch_with_retry(
                         context=context,
@@ -404,41 +1045,8 @@ def run_contextual_translation(
                         batch_rows=batch_rows,
                         batch_index=batch_index,
                         batch_count=len(scene_batches),
-                        stage_runner=lambda current_rows, current_batch_index, current_batch_count: engine.critique_dialogue(
-                            context,
-                            template=prompt_family["semantic_critic"],
-                            batch_payload={
-                                **_scene_batch_payload(
-                                    scene,
-                                    current_rows,
-                                    batch_index=current_batch_index,
-                                    batch_count=current_batch_count,
-                                ),
-                                "scene_plan": planner_output.model_dump(mode="json", by_alias=True),
-                                "semantic_items": [
-                                    semantic_items[str(row["segment_id"])].model_dump(mode="json", by_alias=True)
-                                    for row in current_rows
-                                ],
-                                "adaptation_items": [
-                                    adaptation_items[str(row["segment_id"])].model_dump(mode="json", by_alias=True)
-                                    for row in current_rows
-                                ],
-                            },
-                            source_language=source_language,
-                            target_language=target_language,
-                            context_payload=_build_context_payload(
-                                scene=scene,
-                                planner_summary=planner_output.scene_summary,
-                                existing_character_rows=list(character_profiles.values()),
-                                existing_relationship_rows=list(relationship_profiles.values()),
-                            ),
-                            glossary_payload=_build_glossary_payload(
-                                database,
-                                workspace.project_id,
-                                relationship_rows=list(relationship_profiles.values()),
-                            ),
-                            model=model,
-                        ),
+                        stage_runner=critic_runner,
+                        on_retry=_count_retry,
                     )
                 )
             _validate_stage_item_ids(
@@ -449,7 +1057,6 @@ def run_contextual_translation(
                 batch_index=len(scene_batches),
                 batch_count=len(scene_batches),
             )
-
         for row in scene.segments:
             segment_id = str(row["segment_id"])
             semantic_item = semantic_items[segment_id]
@@ -465,10 +1072,7 @@ def run_contextual_translation(
                     if code not in review_reason_codes:
                         review_reason_codes.append(code)
                 critic_issues = [item.model_dump(mode="json", by_alias=True) for item in critic_item.issues]
-            review_reason_codes = [
-                _normalize_review_reason_code(code)
-                for code in review_reason_codes
-            ]
+            review_reason_codes = [_normalize_review_reason_code(code) for code in review_reason_codes]
             review_reason_codes = list(dict.fromkeys(review_reason_codes))
             needs_review = (
                 semantic_item.needs_human_review
@@ -489,9 +1093,7 @@ def run_contextual_translation(
                     honorific_policy_json=adaptation_item.honorific_policy.model_dump(mode="json", by_alias=True),
                     semantic_translation=semantic_item.semantic_translation,
                     glossary_hits_json=list(semantic_item.glossary_hits),
-                    risk_flags_json=list(
-                        dict.fromkeys(list(semantic_item.risk_flags) + list(adaptation_item.risk_flags))
-                    ),
+                    risk_flags_json=list(dict.fromkeys(list(semantic_item.risk_flags) + list(adaptation_item.risk_flags))),
                     confidence_json=semantic_item.confidence.model_dump(mode="json", by_alias=True),
                     needs_human_review=needs_review,
                     review_status="needs_review" if needs_review else "approved",
@@ -501,9 +1103,10 @@ def run_contextual_translation(
                     approved_tts_text=adaptation_item.tts_text.strip(),
                     semantic_qc_passed=not critic_issues,
                     semantic_qc_issues_json=critic_issues,
-                    source_template_family_id=selected_template.family_id or selected_template.template_id,
-                    adaptation_template_family_id=prompt_family["dialogue_adaptation"].family_id
-                    or prompt_family["dialogue_adaptation"].template_id,
+                    source_template_family_id=active_prompt_family["semantic_pass"].family_id
+                    or active_prompt_family["semantic_pass"].template_id,
+                    adaptation_template_family_id=active_prompt_family["dialogue_adaptation"].family_id
+                    or active_prompt_family["dialogue_adaptation"].template_id,
                     created_at=now,
                     updated_at=now,
                 )
@@ -583,11 +1186,34 @@ def run_contextual_translation(
             )
         )
 
+    narration_scene_count = sum(1 for item in route_decisions if item.route_mode == "narration_fast")
+    any_narration_fast = narration_scene_count > 0
+    all_narration_fast = narration_scene_count == len(route_decisions) and bool(route_decisions)
     return {
         "scenes": scene_records,
         "character_profiles": list(character_profiles.values()),
         "relationship_profiles": list(relationship_profiles.values()),
         "segment_analyses": patched_analyses,
+        "route_decisions": route_decisions,
+        "metrics": metrics,
+        "fast_path": {
+            "active": any_narration_fast,
+            "mode": "narration_fast" if all_narration_fast else ("mixed" if any_narration_fast else "default"),
+            "semantic_batch_size": (
+                NARRATION_FAST_BATCH_SIZE if all_narration_fast else (None if any_narration_fast else CONTEXTUAL_STAGE_BATCH_SIZE)
+            ),
+            "adaptive_batch_caps": (
+                dict(metrics.narration_batch_size_caps)
+                if any_narration_fast
+                else {}
+            ),
+            "planner_mode": "deterministic" if all_narration_fast else ("mixed" if any_narration_fast else "llm"),
+            "critic_enabled": any(item.route_mode == "dialogue" for item in route_decisions),
+            "route_counts": {
+                "narration_fast": narration_scene_count,
+                "dialogue": len(route_decisions) - narration_scene_count,
+            },
+        },
         "semantic_qc": {
             "error_count": qc_report.error_count,
             "warning_count": qc_report.warning_count,

@@ -1,0 +1,55 @@
+{
+  "fixture_id": "zh-vi-narration-incomplete-fragment-pre-review",
+  "class": "incomplete_fragment",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "review_gate",
+  "notes": "Narration fragment dang bo do nhu mot ve thuyet minh chua du nghia. Truoc review, line nay phai o lai review queue thay vi duoc downstream coi la an toan.",
+  "segments": [
+    {
+      "segment_id": "seg-narr-frag-0001",
+      "segment_index": 19,
+      "scene_id": "scene_narr_frag_0001",
+      "source_text": "但真正可怕的是……",
+      "turn_function": "contrast",
+      "register_json": {
+        "politeness": "neutral",
+        "power_direction": "neutral",
+        "emotional_tone": "informative",
+        "confidence": 0.88
+      },
+      "speaker_json": {
+        "character_id": "narrator",
+        "source": "narration",
+        "confidence": 0.97
+      },
+      "listeners_json": [
+        {
+          "character_id": "general humanity",
+          "role": "audience",
+          "confidence": 0.97
+        }
+      ],
+      "honorific_policy_json": {},
+      "confidence_json": {
+        "overall": 0.84,
+        "speaker": 0.97,
+        "listener": 0.97,
+        "relation": 0.0,
+        "translation": 0.71
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.41
+      },
+      "risk_flags_json": [],
+      "review_reason_codes_json": [
+        "incomplete_fragment"
+      ],
+      "review_question": "Câu thuyết minh này có đang bị cụt ý trước khi xuống đoạn tiếp theo không?",
+      "approved_subtitle_text": "Nhưng điều đáng sợ thật sự là...",
+      "approved_tts_text": "Nhưng điều đáng sợ thật sự là..."
+    }
+  ]
+}

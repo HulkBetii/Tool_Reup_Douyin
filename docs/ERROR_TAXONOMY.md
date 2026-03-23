@@ -76,6 +76,8 @@ Examples:
 - vocative or pronoun appears only in `tts_text`, but punctuation-boundary matching misses it
 - TTS-only pronoun injection under ambiguous listener evidence is treated as non-blocking
 - `directionality_mismatch` stays warning even when relation memory was manually locked
+- neutral narration inherits stale default audience policy and gets false-positive `honorific_drift`
+- narration `tts_text` injects `quy vi`/`cac ban` while subtitle stays neutral and QC misses the one-sided drift
 
 Typical fix:
 - promote severity, add new QC rule, or add invariant

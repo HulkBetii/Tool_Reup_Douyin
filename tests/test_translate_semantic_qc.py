@@ -149,3 +149,30 @@ def test_semantic_qc_does_not_apply_address_only_alternate_to_self_side() -> Non
 
     assert "directionality_mismatch" in by_code
     assert "error" in by_code["directionality_mismatch"]
+
+
+def test_semantic_qc_ignores_stale_narration_policy_when_text_is_neutral() -> None:
+    fixture = _load_golden_fixture("zh-vi-narration-stale-honorific-policy-safe.json")
+
+    report = analyze_segment_analyses(fixture["segments"])
+
+    codes = {issue.code for issue in report.issues}
+    assert report.error_count == 0
+    assert report.warning_count == 0
+    assert "honorific_drift" not in codes
+    assert "addressee_mismatch" not in codes
+    assert "pronoun_without_evidence" not in codes
+
+
+def test_semantic_qc_blocks_narration_tts_only_audience_address_injection() -> None:
+    fixture = _load_regression_fixture("zh-vi-narration-audience-address-injection.json")
+
+    report = analyze_segment_analyses(fixture["segments"])
+
+    by_code = {}
+    for issue in report.issues:
+        by_code.setdefault(issue.code, set()).add(issue.severity)
+
+    assert "sub_tts_pronoun_divergence" in by_code
+    assert "error" in by_code["sub_tts_pronoun_divergence"]
+    assert report.error_count >= 1

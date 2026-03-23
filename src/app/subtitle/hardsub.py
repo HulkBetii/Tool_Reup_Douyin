@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.hashing import build_stage_hash, fingerprint_path
@@ -42,6 +43,22 @@ SUBTITLE_CODEC_BY_CONTAINER = {
 }
 
 
+@dataclass(slots=True)
+class VisualBaseResult:
+    stage_hash: str
+    cache_dir: Path
+    visual_base_path: Path
+    manifest_path: Path
+
+
+@dataclass(slots=True)
+class FinalMuxResult:
+    stage_hash: str
+    cache_dir: Path
+    output_path: Path
+    manifest_path: Path
+
+
 def load_export_preset(project_root: Path, preset_id: str | None = None) -> ExportPreset:
     return get_export_preset(project_root, preset_id) or DEFAULT_EXPORT_PRESET
 
@@ -66,6 +83,45 @@ def build_hardsub_stage_hash(
             if watermark_override_path and watermark_override_path.exists()
             else None,
             "preset": export_preset.model_dump(mode="json"),
+            "version": 1,
+        }
+    )
+
+
+def build_visual_base_stage_hash(
+    *,
+    source_video_path: Path,
+    subtitle_path: Path,
+    export_preset: ExportPreset,
+    watermark_override_path: Path | None = None,
+) -> str:
+    return build_stage_hash(
+        {
+            "stage": "visual_base",
+            "source_video": fingerprint_path(source_video_path),
+            "subtitle_file": fingerprint_path(subtitle_path),
+            "watermark_override": fingerprint_path(watermark_override_path)
+            if watermark_override_path and watermark_override_path.exists()
+            else None,
+            "preset": export_preset.model_dump(mode="json"),
+            "version": 1,
+        }
+    )
+
+
+def build_final_mux_stage_hash(
+    *,
+    visual_base_path: Path,
+    final_audio_path: Path,
+    export_preset: ExportPreset,
+) -> str:
+    return build_stage_hash(
+        {
+            "stage": "final_mux",
+            "visual_base": fingerprint_path(visual_base_path),
+            "final_audio": fingerprint_path(final_audio_path),
+            "container": export_preset.container,
+            "audio_codec": export_preset.audio_codec,
             "version": 1,
         }
     )
@@ -261,6 +317,187 @@ def _progress_percent_from_ffmpeg_line(line: str, *, duration_ms: int | None) ->
     except ValueError:
         return None
     return min(99, max(20, int(processed_us / (duration_ms * 10))))
+
+
+def export_visual_base_video(
+    context: JobContext,
+    *,
+    workspace: ProjectWorkspace,
+    source_video_path: Path,
+    subtitle_path: Path,
+    ffmpeg_path: str | None,
+    duration_ms: int | None = None,
+    export_preset: ExportPreset | None = None,
+    export_preset_id: str | None = None,
+    watermark_override_path: Path | None = None,
+) -> VisualBaseResult:
+    ffmpeg_executable = ffmpeg_path or shutil.which("ffmpeg")
+    if not ffmpeg_executable:
+        raise RuntimeError("Khong tim thay ffmpeg.exe")
+    export_preset = export_preset or load_export_preset(workspace.root_dir, export_preset_id)
+    watermark_path = resolve_watermark_path(
+        workspace.root_dir,
+        export_preset,
+        watermark_override_path=watermark_override_path,
+    )
+    effective_preset = export_preset.model_copy(
+        update={"watermark_enabled": export_preset.watermark_enabled or watermark_path is not None}
+    )
+    stage_hash = build_visual_base_stage_hash(
+        source_video_path=source_video_path,
+        subtitle_path=subtitle_path,
+        export_preset=effective_preset,
+        watermark_override_path=watermark_path,
+    )
+    cache_dir = workspace.cache_dir / "export" / "visual_base" / stage_hash
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    visual_base_path = cache_dir / f"visual_base.{effective_preset.container.lower() or 'mp4'}"
+    manifest_path = cache_dir / "visual_base_manifest.json"
+    if manifest_path.exists() and visual_base_path.exists():
+        context.report_progress(100, "Dung cache visual base")
+        return VisualBaseResult(stage_hash=stage_hash, cache_dir=cache_dir, visual_base_path=visual_base_path, manifest_path=manifest_path)
+
+    video_codec = VIDEO_CODEC_MAP.get(effective_preset.video_codec.lower(), "libx264")
+    command = [ffmpeg_executable, "-y", "-i", str(source_video_path)]
+    watermark_input_index: int | None = None
+    if watermark_path is not None:
+        watermark_input_index = 1
+        command.extend(["-i", str(watermark_path)])
+    video_filter_graph, output_label = build_video_filter_graph(
+        subtitle_path=subtitle_path,
+        export_preset=effective_preset,
+        watermark_input_index=watermark_input_index,
+    )
+    command.extend(["-filter_complex", video_filter_graph, "-map", output_label, "-an", "-c:v", video_codec])
+    if video_codec != "copy":
+        command.extend(["-preset", "medium", "-crf", str(effective_preset.crf)])
+    command.extend(["-pix_fmt", "yuv420p", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(visual_base_path)])
+    context.report_progress(20, "Dang render visual base")
+    last_lines: list[str] = []
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        if process.stdout is not None:
+            for raw_line in process.stdout:
+                context.cancellation_token.raise_if_canceled()
+                line = raw_line.strip()
+                if not line:
+                    continue
+                last_lines.append(line)
+                last_lines = last_lines[-20:]
+                progress = _progress_percent_from_ffmpeg_line(line, duration_ms=duration_ms)
+                if progress is not None:
+                    context.report_progress(progress, "Dang render visual base")
+        return_code = process.wait()
+    except JobCancelledError:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        raise
+    if return_code != 0:
+        raise RuntimeError("FFmpeg export visual base that bai:\n" + "\n".join(last_lines[-10:]))
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "stage_hash": stage_hash,
+                "source_video_path": str(source_video_path),
+                "subtitle_path": str(subtitle_path),
+                "watermark_path": str(watermark_path) if watermark_path else None,
+                "visual_base_path": str(visual_base_path),
+                "export_preset": effective_preset.model_dump(mode="json"),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return VisualBaseResult(stage_hash=stage_hash, cache_dir=cache_dir, visual_base_path=visual_base_path, manifest_path=manifest_path)
+
+
+def mux_final_video(
+    context: JobContext,
+    *,
+    workspace: ProjectWorkspace,
+    visual_base_path: Path,
+    final_audio_path: Path,
+    ffmpeg_path: str | None,
+    export_preset: ExportPreset | None = None,
+    export_preset_id: str | None = None,
+) -> FinalMuxResult:
+    ffmpeg_executable = ffmpeg_path or shutil.which("ffmpeg")
+    if not ffmpeg_executable:
+        raise RuntimeError("Khong tim thay ffmpeg.exe")
+    export_preset = export_preset or load_export_preset(workspace.root_dir, export_preset_id)
+    output_path = build_hardsub_output_path(workspace, export_preset)
+    stage_hash = build_final_mux_stage_hash(
+        visual_base_path=visual_base_path,
+        final_audio_path=final_audio_path,
+        export_preset=export_preset,
+    )
+    cache_dir = workspace.cache_dir / "export" / "final_mux" / stage_hash
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = cache_dir / "final_mux_manifest.json"
+    if manifest_path.exists() and output_path.exists():
+        context.report_progress(100, "Dung cache final mux")
+        return FinalMuxResult(stage_hash=stage_hash, cache_dir=cache_dir, output_path=output_path, manifest_path=manifest_path)
+
+    audio_codec = AUDIO_CODEC_MAP.get(export_preset.audio_codec.lower(), "aac")
+    command = [
+        ffmpeg_executable,
+        "-y",
+        "-i",
+        str(visual_base_path),
+        "-i",
+        str(final_audio_path),
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        "-c:v",
+        "copy",
+        "-c:a",
+        audio_codec,
+    ]
+    if audio_codec != "copy":
+        command.extend(["-b:a", "192k"])
+    command.extend(["-movflags", "+faststart", str(output_path)])
+    context.report_progress(20, "Dang mux final video")
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=240,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "Final mux that bai").strip())
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "stage_hash": stage_hash,
+                "visual_base_path": str(visual_base_path),
+                "final_audio_path": str(final_audio_path),
+                "output_path": str(output_path),
+                "export_preset": export_preset.model_dump(mode="json"),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return FinalMuxResult(stage_hash=stage_hash, cache_dir=cache_dir, output_path=output_path, manifest_path=manifest_path)
 
 
 def export_hardsub_video(

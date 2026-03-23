@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.exporting.presets import list_export_presets
 from app.project.models import ProjectWorkspace
@@ -8,9 +9,11 @@ from app.subtitle.hardsub import (
     _progress_percent_from_ffmpeg_line,
     build_hardsub_command,
     build_hardsub_output_path,
+    build_final_mux_stage_hash,
     build_video_filter_graph,
     escape_ffmpeg_filter_path,
     load_export_preset,
+    mux_final_video,
 )
 
 
@@ -175,3 +178,70 @@ def test_hardsub_command_muxes_soft_subtitle_when_burn_disabled(tmp_path: Path) 
 def test_progress_parser_ignores_na_and_parses_numeric_values() -> None:
     assert _progress_percent_from_ffmpeg_line("out_time_ms=N/A", duration_ms=30_000) is None
     assert _progress_percent_from_ffmpeg_line("out_time_ms=15000000", duration_ms=30_000) == 50
+
+
+def test_build_final_mux_stage_hash_changes_when_audio_changes(tmp_path: Path) -> None:
+    visual_base = tmp_path / "visual_base.mp4"
+    audio_a = tmp_path / "audio-a.wav"
+    audio_b = tmp_path / "audio-b.wav"
+    visual_base.write_bytes(b"video")
+    audio_a.write_bytes(b"audio-a")
+    audio_b.write_bytes(b"audio-b")
+    preset = load_export_preset(tmp_path)
+
+    hash_a = build_final_mux_stage_hash(
+        visual_base_path=visual_base,
+        final_audio_path=audio_a,
+        export_preset=preset,
+    )
+    hash_b = build_final_mux_stage_hash(
+        visual_base_path=visual_base,
+        final_audio_path=audio_b,
+        export_preset=preset,
+    )
+
+    assert hash_a != hash_b
+
+
+def test_mux_final_video_uses_stream_copy_for_video(monkeypatch, tmp_path: Path) -> None:
+    root_dir = tmp_path / "project"
+    (root_dir / "exports").mkdir(parents=True)
+    (root_dir / "logs").mkdir()
+    (root_dir / "cache").mkdir()
+    workspace = ProjectWorkspace(
+        project_id="project-1",
+        name="Mux Demo",
+        root_dir=root_dir,
+        database_path=root_dir / "project.db",
+        project_json_path=root_dir / "project.json",
+        logs_dir=root_dir / "logs",
+        cache_dir=root_dir / "cache",
+        exports_dir=root_dir / "exports",
+    )
+    visual_base = root_dir / "visual_base.mp4"
+    final_audio = root_dir / "final_audio.wav"
+    visual_base.write_bytes(b"video")
+    final_audio.write_bytes(b"audio")
+
+    captured: dict[str, object] = {}
+
+    def _run(command, **_kwargs):
+        captured["command"] = command
+        output_path = Path(command[-1])
+        output_path.write_bytes(b"muxed")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("app.subtitle.hardsub.subprocess.run", _run)
+
+    result = mux_final_video(
+        SimpleNamespace(report_progress=lambda *_args, **_kwargs: None),
+        workspace=workspace,
+        visual_base_path=visual_base,
+        final_audio_path=final_audio,
+        ffmpeg_path="ffmpeg.exe",
+    )
+
+    assert result.output_path.exists()
+    assert captured["command"][0] == "ffmpeg.exe"
+    assert "-c:v" in captured["command"]
+    assert captured["command"][captured["command"].index("-c:v") + 1] == "copy"

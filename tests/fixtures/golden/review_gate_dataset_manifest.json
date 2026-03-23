@@ -17,6 +17,20 @@
       "path": "tests/fixtures/regression/zh-vi-ambiguous-object-reference-pre-review-failsafe.json"
     },
     {
+      "fixture_id": "zh-vi-narration-incomplete-fragment-pre-review",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "incomplete_fragment",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-narration-incomplete-fragment-pre-review.json"
+    },
+    {
+      "fixture_id": "zh-vi-narration-technical-term-uncertainty-pre-review",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "technical_term_uncertainty",
+      "expected_outcome": "needs_review",
+      "path": "tests/fixtures/regression/zh-vi-narration-technical-term-uncertainty-pre-review.json"
+    },
+    {
       "fixture_id": "zh-vi-uncertain-speaker-pre-review-failsafe",
       "source_run": "contextual-v2-video-test-tq-120s-20260320",
       "class": "uncertain_speaker",
@@ -50,6 +64,13 @@
       "class": "sub_tts_pronoun_divergence",
       "expected_outcome": "blocked",
       "path": "tests/fixtures/regression/zh-vi-tts-pronoun-injection-ambiguous-listener.json"
+    },
+    {
+      "fixture_id": "zh-vi-narration-audience-address-injection",
+      "source_run": "contextual-v2-earth-depth-full-20260321",
+      "class": "narration_tts_only_audience_address_injection",
+      "expected_outcome": "blocked",
+      "path": "tests/fixtures/regression/zh-vi-narration-audience-address-injection.json"
     },
     {
       "fixture_id": "zh-vi-locked-relation-directionality-mismatch",

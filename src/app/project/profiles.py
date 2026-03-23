@@ -91,7 +91,50 @@ def _default_project_profiles() -> list[ProjectProfile]:
                 "Mau duoc rut ra tu cac video khoa hoc/kham pha/narration dai. "
                 "Nen giu cau gon, trung tinh, de nghe va uu tien fit/slot an toan."
             ),
-        )
+        ),
+        ProjectProfile(
+            project_profile_id="zh-vi-narration-fast-vieneu",
+            name="Narration Fast VieNeu",
+            description=(
+                "Preset zh->vi cho video thuyet minh dai: giu giong/ASS giong profile narration "
+                "clear, nhung uu tien fast path voi planner noi bo, batch lon hon va context nhe hon."
+            ),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            recommended_prompt_template_id="contextual_narration_fast_adaptation",
+            active_voice_preset_id="vieneu-default-vi",
+            active_export_preset_id="youtube-16x9",
+            active_watermark_profile_id="watermark-none",
+            recommended_original_volume=0.07,
+            recommended_voice_volume=1.0,
+            voice_preset_overrides={
+                "vieneu-default-vi": {
+                    "speed": 0.93,
+                    "volume": 1.0,
+                    "pitch": 0.0,
+                    "sample_rate": 24000,
+                    "language": "vi",
+                    "notes": (
+                        "VieNeu cham nhe cho fast-path narration zh->vi, uu tien doc ro y "
+                        "va khong qua voi."
+                    ),
+                }
+            },
+            style_preset_overrides={
+                "default-ass": {
+                    "FontSize": 12,
+                    "Outline": 2,
+                    "Shadow": 0,
+                    "Alignment": 2,
+                    "MarginV": 48,
+                }
+            },
+            notes=(
+                "Fast path dung cho video khoa hoc/kham pha/hoang da it doi thoai. "
+                "Uu tien narration trung tinh, giam token/call va giam review gia do memory dialogue."
+            ),
+        ),
     ]
 
 

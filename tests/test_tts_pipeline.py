@@ -34,6 +34,21 @@ class _DummyEngine:
         )
 
 
+class _CountingEngine:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Path]] = []
+
+    def synthesize(self, *, text: str, output_path: Path, preset: VoicePreset) -> SynthesisResult:
+        self.calls.append((text, output_path))
+        _write_pcm_wav(output_path, sample_rate=preset.sample_rate, duration_ms=320)
+        return SynthesisResult(
+            wav_path=output_path,
+            duration_ms=320,
+            sample_rate=preset.sample_rate,
+            voice_id=preset.voice_id,
+        )
+
+
 def _load_regression_fixture(name: str) -> dict[str, object]:
     fixture_path = Path(__file__).resolve().parent / "fixtures" / "regression" / name
     return json.loads(fixture_path.read_text(encoding="utf-8"))
@@ -165,6 +180,101 @@ def test_build_tts_stage_hash_changes_when_segment_voice_style_changes() -> None
     )
 
     assert base_hash != style_hash
+
+
+def test_build_tts_stage_hash_ignores_subtitle_only_edits_when_tts_text_is_unchanged() -> None:
+    preset = VoicePreset(
+        voice_preset_id="default-sapi",
+        name="Default",
+        engine="sapi",
+        sample_rate=22050,
+    )
+    base_segments = [
+        {
+            "segment_id": "seg-1",
+            "segment_index": 0,
+            "start_ms": 0,
+            "end_ms": 1000,
+            "tts_text": "Xin chao moi nguoi",
+            "subtitle_text": "Xin chao moi nguoi",
+            "translated_text": "Xin chao moi nguoi",
+        }
+    ]
+    subtitle_only_edit = [
+        {
+            **base_segments[0],
+            "subtitle_text": "Xin chao tat ca moi nguoi",
+        }
+    ]
+
+    assert build_tts_stage_hash(base_segments, preset) == build_tts_stage_hash(subtitle_only_edit, preset)
+
+
+def test_synthesize_segments_reuses_shared_tts_clip_cache_across_stage_hash_changes(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    preset = VoicePreset(
+        voice_preset_id="vieneu-default",
+        name="VieNeu",
+        engine="vieneu",
+        sample_rate=24000,
+        language="vi",
+    )
+    base_segments = [
+        {
+            "segment_id": "seg-1",
+            "segment_index": 0,
+            "start_ms": 0,
+            "end_ms": 1000,
+            "tts_text": "Xin chao",
+            "subtitle_text": "Xin chao",
+            "translated_text": "Xin chao",
+            "source_text": "Ni hao",
+        },
+        {
+            "segment_id": "seg-2",
+            "segment_index": 1,
+            "start_ms": 1000,
+            "end_ms": 2000,
+            "tts_text": "Di thoi",
+            "subtitle_text": "Di thoi",
+            "translated_text": "Di thoi",
+            "source_text": "Zou ba",
+        },
+    ]
+    updated_segments = [
+        base_segments[0],
+        {
+            **base_segments[1],
+            "tts_text": "Di thoi nhe",
+            "subtitle_text": "Di thoi nhe",
+            "translated_text": "Di thoi nhe",
+        },
+    ]
+
+    first_engine = _CountingEngine()
+    first_result = synthesize_segments(
+        _DummyContext(),
+        workspace=workspace,
+        segments=base_segments,
+        preset=preset,
+        engine=first_engine,
+    )
+    second_engine = _CountingEngine()
+    second_result = synthesize_segments(
+        _DummyContext(),
+        workspace=workspace,
+        segments=updated_segments,
+        preset=preset,
+        engine=second_engine,
+    )
+
+    first_by_segment = {item.segment_id: item for item in first_result.artifacts}
+    second_by_segment = {item.segment_id: item for item in second_result.artifacts}
+
+    assert len(first_engine.calls) == 2
+    assert len(second_engine.calls) == 1
+    assert first_by_segment["seg-1"].raw_wav_path == second_by_segment["seg-1"].raw_wav_path
+    assert first_by_segment["seg-2"].raw_wav_path != second_by_segment["seg-2"].raw_wav_path
 
 
 def test_synthesize_segments_uses_segment_voice_presets(tmp_path: Path, monkeypatch) -> None:

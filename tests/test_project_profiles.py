@@ -20,7 +20,10 @@ def test_ensure_project_profiles_writes_default_narration_profile(tmp_path: Path
     ensure_project_profiles(project_root)
     profiles = list_project_profiles(project_root)
 
-    assert {profile.project_profile_id for profile in profiles} == {"zh-vi-narration-clear-vieneu"}
+    assert {profile.project_profile_id for profile in profiles} == {
+        "zh-vi-narration-clear-vieneu",
+        "zh-vi-narration-fast-vieneu",
+    }
 
 
 def test_bootstrap_project_applies_requested_project_profile(tmp_path: Path) -> None:
@@ -53,6 +56,26 @@ def test_bootstrap_project_applies_requested_project_profile(tmp_path: Path) -> 
     assert profile_state.project_profile_id == "zh-vi-narration-clear-vieneu"
     assert profile_state.recommended_original_volume == 0.07
     assert profile_state.recommended_prompt_template_id == "contextual_default_adaptation"
+
+
+def test_bootstrap_project_applies_requested_narration_fast_profile(tmp_path: Path) -> None:
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Fast Demo",
+            root_dir=tmp_path / "narration-fast-project",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-vieneu",
+        )
+    )
+    database = ProjectDatabase(workspace.database_path)
+    profile_state = load_project_profile_state(workspace.root_dir)
+
+    assert database.get_translation_mode(workspace.project_id) == "contextual_v2"
+    assert database.get_active_voice_preset_id(workspace.project_id) == "vieneu-default-vi"
+    assert profile_state is not None
+    assert profile_state.project_profile_id == "zh-vi-narration-fast-vieneu"
+    assert profile_state.recommended_prompt_template_id == "contextual_narration_fast_adaptation"
 
 
 def test_resolve_project_profile_mix_defaults_uses_profile_state(tmp_path: Path) -> None:

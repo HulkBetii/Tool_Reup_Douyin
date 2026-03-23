@@ -67,6 +67,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/translate/semantic_qc.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\semantic_qc.py)
   - runtime note:
     - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py) is also the hook for stage-batch resilience. It should split batches not only for mismatched ids, but also for retryable structured-output parse failures on large scene batches.
+    - narration routing now happens per-scene inside [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py): narration-like scenes use deterministic planner + positional structured outputs, while dialogue/borderline scenes fall back to the full dialogue path.
+    - [src/app/translate/openai_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\openai_engine.py) now builds stable `prompt_cache_key` values and uses a fixed prompt section order (`constraints -> context -> glossary -> source`) to maximize prompt-cache reuse.
 
 - subtitle
   - editor helpers, subtitle QC, preview, SRT/ASS export, hard-sub rendering
@@ -87,6 +89,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/audio/mixdown.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\mixdown.py)
   - runtime note:
     - [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py) must preserve or probe cached clip duration metadata. If cached `duration_ms` collapses to `0`, [src/app/audio/voiceover_track.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\voiceover_track.py) will hard-trim clips to slot length and cut sentences mid-speech.
+    - [src/app/tts/pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\tts\pipeline.py) now reuses per-clip shared TTS cache under `cache/tts/clips/`, so narration reruns can avoid resynthesizing unchanged segments even when the overall stage hash changes.
+    - narration-only incremental audio helpers live in [src/app/audio/narration_incremental.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\audio\narration_incremental.py).
 
 - ui
   - end-user workflow, review queue, gates, manual repair entrypoints
@@ -134,6 +138,18 @@ Important distinction:
 11. voice track + mixdown produce audio artifacts
 12. export uses active subtitle track + optional mixed audio
 13. ops layer can preflight/block, backup, repair stale metadata, and prune orphan cache without changing semantic content
+
+Narration incremental rerun v1:
+
+- eligible only when the project/profile is narration-oriented and no speaker binding / voice policy layer is active
+- builds:
+  - `voice_scene_chunk(scene_id)`
+  - `mixed_scene_chunk(scene_id)`
+  - `final_audio_track`
+  - `visual_base`
+  - `final_mux`
+- this path is wired through [scripts/rerun_contextual_downstream.py](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\rerun_contextual_downstream.py)
+- if scene coverage is missing or not contiguous, runtime falls back to the legacy full rerun path
 
 ## Reusable project profiles
 

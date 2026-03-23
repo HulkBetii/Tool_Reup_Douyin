@@ -16,6 +16,7 @@ from app.media.extract_audio import extract_audio_artifacts
 from app.media.ffprobe_service import attach_source_video_to_project, probe_media
 from app.project.bootstrap import ProjectInitRequest, bootstrap_project
 from app.project.database import ProjectDatabase
+from app.project.profiles import load_project_profile_state
 from app.translate.contextual_pipeline import (
     build_contextual_translation_stage_hash,
     persist_contextual_translation_result,
@@ -106,7 +107,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--source-language", default="zh")
     parser.add_argument("--target-language", default="vi")
     parser.add_argument("--asr-language", default="zh")
-    parser.add_argument("--prompt-template-id", default="contextual_cartoon_fun_adaptation")
+    parser.add_argument("--prompt-template-id")
     parser.add_argument("--project-profile-id")
     return parser.parse_args()
 
@@ -148,6 +149,12 @@ def main() -> int:
         )
     )
     database = ProjectDatabase(workspace.database_path)
+    profile_state = load_project_profile_state(project_root)
+    prompt_template_id = (
+        args.prompt_template_id
+        or (profile_state.recommended_prompt_template_id if profile_state is not None else None)
+        or "contextual_cartoon_fun_adaptation"
+    )
 
     metadata = probe_media(
         clip_path,
@@ -185,7 +192,7 @@ def main() -> int:
     )
 
     segments = database.list_segments(workspace.project_id)
-    selected_template = load_prompt_template(project_root, args.prompt_template_id)
+    selected_template = load_prompt_template(project_root, prompt_template_id)
     source_language = segments[0]["source_lang"] or args.source_language
     model = settings.default_translation_model
     stage_hash = build_contextual_translation_stage_hash(
@@ -217,6 +224,8 @@ def main() -> int:
         character_profiles=contextual_result["character_profiles"],
         relationship_profiles=contextual_result["relationship_profiles"],
         analyses=contextual_result["segment_analyses"],
+        route_decisions=contextual_result.get("route_decisions"),
+        metrics=contextual_result.get("metrics"),
     )
 
     review_reason_counts, review_samples = _review_samples(database, workspace.project_id)
@@ -226,7 +235,18 @@ def main() -> int:
         "clip_path": str(clip_path),
         "translation_mode": "contextual_v2",
         "project_profile_id": args.project_profile_id,
+        "project_profile_prompt_template_id": profile_state.recommended_prompt_template_id if profile_state else None,
         "selected_template": selected_template.template_id,
+        "fast_path": contextual_result.get("fast_path"),
+        "route_decisions": [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in contextual_result.get("route_decisions", [])
+        ],
+        "metrics": (
+            contextual_result["metrics"].model_dump(mode="json")
+            if hasattr(contextual_result.get("metrics"), "model_dump")
+            else contextual_result.get("metrics")
+        ),
         "stage_hash": stage_hash,
         "asr_segment_count": len(segments),
         "scene_count": len(contextual_result["scenes"]),

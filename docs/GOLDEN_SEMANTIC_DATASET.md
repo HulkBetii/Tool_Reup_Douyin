@@ -72,6 +72,11 @@ Current dataset covers:
 - real-world fail-safe cases for pronoun divergence and low-confidence single-turn ambiguity
 - reviewed object-reference cases from `Shinchan`
 - reviewed technical narration/object phrase cases from `Wilderness`
+- narration-safe stale audience-policy cases from `Earth depth`
+- narration TTS-only audience-address injection as a blocking QC case
+- narration pre-review fail-safe routing for:
+  - `incomplete_fragment`
+  - `technical_term_uncertainty`
 - pre-review fail-safe routing for:
   - `ambiguous_term`
   - `ambiguous_object_reference`

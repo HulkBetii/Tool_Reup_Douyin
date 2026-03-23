@@ -41,6 +41,17 @@
       "notes": "Dialogue adaptation batch tren scene dai co the tra ve structured JSON bi cat giua chung. Runtime phai tu split batch nho hon thay vi abort toan bo run."
     },
     {
+      "fixture_id": "zh-vi-narration-positional-under-return-batch-downshift",
+      "class": "narration_positional_under_return_batch_downshift",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "translation",
+      "path": "tests/fixtures/regression/zh-vi-narration-positional-under-return-batch-downshift.json",
+      "notes": "Narration positional structured output co the tra thieu items tren batch semantic lon. Runtime phai tu downshift batch size cho cac batch narration con lai thay vi tiep tuc retry batch 16 roi split lap lai."
+    },
+    {
       "fixture_id": "zh-vi-register-voice-style-fallback",
       "class": "register_voice_style_fallback",
       "languages": [
@@ -380,6 +391,61 @@
       "kind": "tts_gate",
       "path": "tests/fixtures/regression/zh-vi-speaker-binding-unknown-placeholder-falls-back.json",
       "notes": "Placeholder speaker ids nhu unknown_speaker_1 va Unknown Speaker 2 khong duoc bi coi la speaker da nhan dien can manual binding."
+    },
+    {
+      "fixture_id": "zh-vi-narration-stale-honorific-policy-safe",
+      "class": "narration_stale_honorific_policy_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-narration-stale-honorific-policy-safe.json",
+      "notes": "Narration trung tinh co stale default audience policy khong duoc bi semantic QC flag drift hay ep xung ho neu subtitle/TTS deu neutral."
+    },
+    {
+      "fixture_id": "zh-vi-narration-audience-address-injection",
+      "class": "narration_tts_only_audience_address_injection",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/regression/zh-vi-narration-audience-address-injection.json",
+      "notes": "Narration subtitle trung tinh nhung TTS tu them cach goi khan gia nhu quy vi/cac ban phai bi semantic QC block."
+    },
+    {
+      "fixture_id": "zh-vi-narration-incomplete-fragment-pre-review",
+      "class": "incomplete_fragment",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-narration-incomplete-fragment-pre-review.json",
+      "notes": "Narration bi dut y/fragment truoc review phai o lai review queue, khong duoc downstream coi la an toan."
+    },
+    {
+      "fixture_id": "zh-vi-narration-technical-term-uncertainty-pre-review",
+      "class": "technical_term_uncertainty",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "review_gate",
+      "path": "tests/fixtures/regression/zh-vi-narration-technical-term-uncertainty-pre-review.json",
+      "notes": "Narration khoa hoc co thuat ngu chua du chac nghia phai giu needs_review cho toi khi reviewer chot."
+    },
+    {
+      "fixture_id": "zh-vi-narration-geology-term-reviewed-safe",
+      "class": "narration_geology_term_reviewed_safe",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "semantic_qc",
+      "path": "tests/fixtures/golden/zh-vi-narration-geology-term-reviewed-safe.json",
+      "notes": "Narration khoa hoc sau review voi thuat ngu dia chat da duoc chot phai tiep tuc pass sach qua semantic QC."
     }
   ]
 }

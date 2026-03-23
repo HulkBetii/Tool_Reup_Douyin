@@ -1,0 +1,100 @@
+{
+  "fixture_id": "zh-vi-narration-stale-honorific-policy-safe",
+  "class": "narration_stale_honorific_policy_safe",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Narration line co stale default honorific policy theo audience, nhung subtitle/TTS deu trung tinh. Semantic QC khong duoc flag drift hay ep xung ho.",
+  "segments": [
+    {
+      "segment_id": "seg-narr-pol-0001",
+      "segment_index": 101,
+      "scene_id": "scene_narr_0100",
+      "source_text": "直到今天，人类仍然无法触碰这片岩层更深处的秘密。",
+      "turn_function": "inform",
+      "register_json": {
+        "politeness": "neutral",
+        "power_direction": "neutral",
+        "emotional_tone": "informative",
+        "confidence": 0.94
+      },
+      "speaker_json": {
+        "character_id": "narrator",
+        "source": "narration",
+        "confidence": 0.98
+      },
+      "listeners_json": [
+        {
+          "character_id": "general humanity",
+          "role": "audience",
+          "confidence": 0.98
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "tôi",
+        "address_term": "các bạn",
+        "locked": false,
+        "confidence": 0.83
+      },
+      "confidence_json": {
+        "overall": 0.91,
+        "speaker": 0.98,
+        "listener": 0.98,
+        "relation": 0.83
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Cho đến nay, con người vẫn chưa chạm tới phần sâu nhất của lớp đá này.",
+      "approved_tts_text": "Cho đến nay, con người vẫn chưa chạm tới phần sâu nhất của lớp đá này."
+    },
+    {
+      "segment_id": "seg-narr-pol-0002",
+      "segment_index": 102,
+      "scene_id": "scene_narr_0100",
+      "source_text": "几十年过去，我们对脚下世界的认知依然极其有限。",
+      "turn_function": "contrast",
+      "register_json": {
+        "politeness": "neutral",
+        "power_direction": "neutral",
+        "emotional_tone": "informative",
+        "confidence": 0.93
+      },
+      "speaker_json": {
+        "character_id": "narrator",
+        "source": "narration",
+        "confidence": 0.98
+      },
+      "listeners_json": [
+        {
+          "character_id": "general humanity",
+          "role": "audience",
+          "confidence": 0.98
+        }
+      ],
+      "honorific_policy_json": {
+        "policy_id": "default",
+        "self_term": "chúng tôi",
+        "address_term": "quý vị",
+        "locked": false,
+        "confidence": 0.81
+      },
+      "confidence_json": {
+        "overall": 0.9,
+        "speaker": 0.98,
+        "listener": 0.98,
+        "relation": 0.81
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.9
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Nhiều thập kỷ đã trôi qua, nhưng hiểu biết về thế giới dưới chân ta vẫn rất ít.",
+      "approved_tts_text": "Nhiều thập kỷ đã trôi qua, nhưng hiểu biết về thế giới dưới chân ta vẫn rất ít."
+    }
+  ]
+}

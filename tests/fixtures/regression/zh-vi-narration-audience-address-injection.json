@@ -1,0 +1,50 @@
+{
+  "fixture_id": "zh-vi-narration-audience-address-injection",
+  "class": "narration_tts_only_audience_address_injection",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "semantic_qc",
+  "notes": "Narration subtitle trung tinh nhung TTS tu them cach goi khan gia. Case nay phai bi semantic QC block thay vi de drift qua narration videos.",
+  "segments": [
+    {
+      "segment_id": "seg-narr-inj-0001",
+      "segment_index": 77,
+      "scene_id": "scene_narr_0077",
+      "source_text": "在这层岩石下面，还藏着另一段更加古老的历史。",
+      "turn_function": "inform",
+      "register_json": {
+        "politeness": "neutral",
+        "power_direction": "neutral",
+        "emotional_tone": "informative",
+        "confidence": 0.95
+      },
+      "speaker_json": {
+        "character_id": "narrator",
+        "source": "narration",
+        "confidence": 0.99
+      },
+      "listeners_json": [
+        {
+          "character_id": "general humanity",
+          "role": "audience",
+          "confidence": 0.99
+        }
+      ],
+      "honorific_policy_json": {},
+      "confidence_json": {
+        "overall": 0.94,
+        "speaker": 0.99,
+        "listener": 0.99,
+        "relation": 0.0
+      },
+      "resolved_ellipsis_json": {
+        "confidence": 0.92
+      },
+      "risk_flags_json": [],
+      "approved_subtitle_text": "Bên dưới lớp đá này còn ẩn một lớp lịch sử cổ xưa hơn nữa.",
+      "approved_tts_text": "Quý vị, bên dưới lớp đá này còn ẩn một lớp lịch sử cổ xưa hơn nữa."
+    }
+  ]
+}

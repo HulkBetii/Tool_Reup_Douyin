@@ -42,6 +42,8 @@ It should catch classes of failure that are dangerous even when the text is flue
     - `self_terms` may relax `self_term` only
     - `address_terms` may relax `address_term` only
     - legacy flat lists continue to mean "allowed on both sides"
+11. Narration-safe rows must not inherit stale default audience honorific policy if `subtitle_text` and `tts_text` are both neutral.
+12. Narration rows must not let `tts_text` inject audience-address terms such as `quy vi`, `cac ban`, or `moi nguoi` on only one side.
 
 ## Fail-safe rule
 
@@ -60,6 +62,12 @@ then the output should prefer:
 - semantic QC issue
 
 instead of a confident but risky guess.
+
+For narration videos in particular, this means:
+
+- incomplete fragments stay in review
+- technical-term uncertainty stays in review until a human closes the term
+- neutral narration should remain neutral unless the audience address is explicit in both subtitle and TTS
 
 ## Recommended future additions
 

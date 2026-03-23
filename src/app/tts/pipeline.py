@@ -8,7 +8,7 @@ from sqlite3 import Row
 from app.core.jobs import JobContext
 from app.project.models import ProjectWorkspace
 
-from .base import TTSEngine, build_tts_stage_hash
+from .base import TTSEngine, build_tts_clip_hash, build_tts_stage_hash
 from .models import SynthesizedSegmentArtifact, SynthesizedSegmentsResult, VoicePreset
 
 
@@ -28,6 +28,12 @@ def _load_cached_artifact_metadata(manifest_path: Path) -> dict[str, dict[str, o
         if segment_id:
             metadata_by_segment_id[segment_id] = item
     return metadata_by_segment_id
+
+
+def _load_json_payload(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _probe_wav_duration_ms(path: Path) -> int:
@@ -65,6 +71,7 @@ def synthesize_segments(
     cache_dir = workspace.cache_dir / "tts" / stage_hash
     raw_dir = cache_dir / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
+    clip_cache_root = workspace.cache_dir / "tts" / "clips"
     manifest_path = cache_dir / "manifest.json"
     cached_metadata_by_segment_id = _load_cached_artifact_metadata(manifest_path)
 
@@ -83,10 +90,30 @@ def synthesize_segments(
 
             active_engine = create_tts_engine(active_preset, project_root=workspace.root_dir)
             engine_cache[active_preset.voice_preset_id] = active_engine
-        output_path = raw_dir / f"{row['segment_index']:04d}_{row['segment_id']}.wav"
+        legacy_output_path = raw_dir / f"{row['segment_index']:04d}_{row['segment_id']}.wav"
+        cached_metadata = cached_metadata_by_segment_id.get(segment_id, {})
+        cached_output_raw = str(cached_metadata.get("raw_wav_path") or "").strip()
+        cached_output_path = Path(cached_output_raw) if cached_output_raw else None
+        clip_hash = build_tts_clip_hash(text=text, preset=active_preset)
+        clip_cache_dir = clip_cache_root / clip_hash
+        shared_output_path = clip_cache_dir / "clip.wav"
+        clip_manifest_path = clip_cache_dir / "manifest.json"
+        output_path = next(
+            (
+                candidate
+                for candidate in (cached_output_path, shared_output_path, legacy_output_path)
+                if candidate is not None and candidate.exists() and candidate.stat().st_size > 44
+            ),
+            shared_output_path,
+        )
         if output_path.exists() and output_path.stat().st_size > 44:
-            cached_metadata = cached_metadata_by_segment_id.get(segment_id, {})
-            cached_duration_ms = int(cached_metadata.get("duration_ms") or 0)
+            clip_metadata = _load_json_payload(clip_manifest_path)
+            metadata_source = (
+                cached_metadata
+                if cached_output_path is not None and output_path == cached_output_path and cached_metadata
+                else clip_metadata
+            )
+            cached_duration_ms = int(metadata_source.get("duration_ms") or 0)
             if cached_duration_ms <= 0:
                 cached_duration_ms = _probe_wav_duration_ms(output_path)
             artifact = SynthesizedSegmentArtifact(
@@ -97,8 +124,8 @@ def synthesize_segments(
                 text=text,
                 raw_wav_path=output_path,
                 duration_ms=cached_duration_ms,
-                sample_rate=int(cached_metadata.get("sample_rate") or active_preset.sample_rate),
-                voice_id=str(cached_metadata.get("voice_id") or active_preset.voice_id),
+                sample_rate=int(metadata_source.get("sample_rate") or active_preset.sample_rate),
+                voice_id=str(metadata_source.get("voice_id") or active_preset.voice_id),
                 voice_preset_id=active_preset.voice_preset_id,
                 speaker_key=(segment_speaker_keys or {}).get(segment_id),
                 voice_speed=active_preset.speed,
@@ -107,7 +134,24 @@ def synthesize_segments(
             )
         else:
             context.cancellation_token.raise_if_canceled()
+            clip_cache_dir.mkdir(parents=True, exist_ok=True)
             result = active_engine.synthesize(text=text, output_path=output_path, preset=active_preset)
+            clip_manifest_path.write_text(
+                json.dumps(
+                    {
+                        "clip_hash": clip_hash,
+                        "text": text,
+                        "raw_wav_path": str(result.wav_path),
+                        "duration_ms": result.duration_ms,
+                        "sample_rate": result.sample_rate,
+                        "voice_id": result.voice_id,
+                        "voice_preset": active_preset.model_dump(mode="json"),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             artifact = SynthesizedSegmentArtifact(
                 segment_id=segment_id,
                 segment_index=int(row["segment_index"]),

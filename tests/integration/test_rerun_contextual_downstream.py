@@ -68,6 +68,100 @@ def _preset(voice_preset_id: str, **overrides) -> VoicePreset:
     return VoicePreset(**payload)
 
 
+def test_narration_incremental_candidate_accepts_narration_profile_without_policy_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = SimpleNamespace(
+        list_segment_analyses=lambda _project_id: [
+            {"source_template_family_id": "contextual-narration-fast-vi"},
+            {"source_template_family_id": "contextual-narration-fast-vi"},
+        ]
+    )
+    voice_plan = SimpleNamespace(active_bindings=False, active_voice_policies=False)
+
+    monkeypatch.setattr(
+        module,
+        "load_project_profile_state",
+        lambda _root_dir: SimpleNamespace(project_profile_id="zh-vi-narration-fast-vieneu"),
+    )
+
+    candidate, reason = module._is_narration_incremental_candidate(
+        workspace=workspace,
+        database=database,
+        voice_plan=voice_plan,
+    )
+
+    assert candidate is True
+    assert reason == ""
+
+
+def test_narration_incremental_candidate_rejects_projects_with_voice_policy_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = SimpleNamespace(
+        list_segment_analyses=lambda _project_id: [{"source_template_family_id": "contextual-narration-fast-vi"}]
+    )
+
+    monkeypatch.setattr(
+        module,
+        "load_project_profile_state",
+        lambda _root_dir: SimpleNamespace(project_profile_id="zh-vi-narration-clear-vieneu"),
+    )
+
+    candidate, reason = module._is_narration_incremental_candidate(
+        workspace=workspace,
+        database=database,
+        voice_plan=SimpleNamespace(active_bindings=False, active_voice_policies=True),
+    )
+
+    assert candidate is False
+    assert reason == "voice_policy_active"
+
+
+def test_resolve_narration_scene_rows_accepts_contiguous_scene_coverage() -> None:
+    module = _load_script_module()
+    segments = [
+        {"segment_id": "seg-1", "segment_index": 0},
+        {"segment_id": "seg-2", "segment_index": 1},
+        {"segment_id": "seg-3", "segment_index": 2},
+    ]
+    database = SimpleNamespace(
+        list_scene_memories=lambda _project_id: [
+            {"scene_id": "scene-0000", "scene_index": 0, "start_segment_index": 0, "end_segment_index": 1},
+            {"scene_id": "scene-0001", "scene_index": 1, "start_segment_index": 2, "end_segment_index": 2},
+        ]
+    )
+
+    scene_rows, reason = module._resolve_narration_scene_rows(database, "project-1", segments)
+
+    assert [row["scene_id"] for row in scene_rows] == ["scene-0000", "scene-0001"]
+    assert reason == ""
+
+
+def test_resolve_narration_scene_rows_rejects_gapped_scene_coverage() -> None:
+    module = _load_script_module()
+    segments = [
+        {"segment_id": "seg-1", "segment_index": 0},
+        {"segment_id": "seg-2", "segment_index": 1},
+        {"segment_id": "seg-3", "segment_index": 2},
+    ]
+    database = SimpleNamespace(
+        list_scene_memories=lambda _project_id: [
+            {"scene_id": "scene-0000", "scene_index": 0, "start_segment_index": 0, "end_segment_index": 0},
+            {"scene_id": "scene-0001", "scene_index": 1, "start_segment_index": 2, "end_segment_index": 2},
+        ]
+    )
+
+    scene_rows, reason = module._resolve_narration_scene_rows(database, "project-1", segments)
+
+    assert scene_rows == []
+    assert reason == "scene_segments_not_contiguous"
+
+
 def test_rerun_contextual_downstream_blocks_partial_speaker_binding_config(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_script_module()
     fixture = _load_regression_fixture("zh-vi-speaker-binding-partial-config-blocks-tts.json")

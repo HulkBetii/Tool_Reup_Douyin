@@ -1,0 +1,10 @@
+{
+  "fixture_id": "zh-vi-narration-positional-under-return-batch-downshift",
+  "stage_label": "Semantic pass",
+  "scene_id": "scene_0000",
+  "initial_batch_size": 16,
+  "reduced_batch_size": 8,
+  "segment_count": 40,
+  "under_return_count": 6,
+  "notes": "Narration positional structured output co the tra thieu items tren batch lon. Runtime phai downshift future batch size thay vi tiep tuc goi lai batch lon tren cac batch con lai."
+}

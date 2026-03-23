@@ -29,6 +29,11 @@ def build_tts_stage_hash(
     segment_voice_preset_ids: Mapping[str, str] | None = None,
     segment_voice_presets: Mapping[str, VoicePreset] | None = None,
 ) -> str:
+    def _effective_synthesis_text(row: Row) -> str:
+        if allow_source_fallback:
+            return (row["tts_text"] or row["subtitle_text"] or row["translated_text"] or row["source_text"] or "").strip()
+        return (row["tts_text"] or row["subtitle_text"] or row["translated_text"] or "").strip()
+
     normalized_segment_voice_preset_ids = {
         str(segment_id): str(preset_id)
         for segment_id, preset_id in (segment_voice_preset_ids or {}).items()
@@ -50,9 +55,7 @@ def build_tts_stage_hash(
                     "segment_index": row["segment_index"],
                     "start_ms": row["start_ms"],
                     "end_ms": row["end_ms"],
-                    "tts_text": row["tts_text"],
-                    "subtitle_text": row["subtitle_text"],
-                    "translated_text": row["translated_text"],
+                    "synthesis_text": _effective_synthesis_text(row),
                     "voice_preset": normalized_segment_voice_presets.get(
                         str(row["segment_id"]),
                         {
@@ -66,6 +69,17 @@ def build_tts_stage_hash(
                 }
                 for row in segments
             ],
-            "version": 3,
+            "version": 4,
+        }
+    )
+
+
+def build_tts_clip_hash(*, text: str, preset: VoicePreset) -> str:
+    return build_stage_hash(
+        {
+            "stage": "tts_clip",
+            "text": text,
+            "voice_preset": preset.model_dump(mode="json"),
+            "version": 1,
         }
     )

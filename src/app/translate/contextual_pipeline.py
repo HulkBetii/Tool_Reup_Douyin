@@ -394,8 +394,10 @@ def _cache_payload(
     character_profiles: list[CharacterProfileRecord],
     relationship_profiles: list[RelationshipProfileRecord],
     analyses: list[SegmentAnalysisRecord],
+    route_decisions: list[object] | None = None,
+    metrics: object | None = None,
 ) -> dict[str, object]:
-    return {
+    payload = {
         "stage_hash": stage_hash,
         "selected_template_id": selected_template.template_id,
         "selected_template_family_id": selected_template.family_id,
@@ -405,6 +407,14 @@ def _cache_payload(
         "relationship_profiles": [asdict(item) for item in relationship_profiles],
         "segment_analyses": [asdict(item) for item in analyses],
     }
+    if route_decisions is not None:
+        payload["route_decisions"] = [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in route_decisions
+        ]
+    if metrics is not None:
+        payload["metrics"] = metrics.model_dump(mode="json") if hasattr(metrics, "model_dump") else metrics
+    return payload
 
 
 def persist_contextual_translation_result(
@@ -418,6 +428,8 @@ def persist_contextual_translation_result(
     character_profiles: list[CharacterProfileRecord],
     relationship_profiles: list[RelationshipProfileRecord],
     analyses: list[SegmentAnalysisRecord],
+    route_decisions: list[object] | None = None,
+    metrics: object | None = None,
 ) -> Path:
     cache_dir = _cache_dir(workspace, stage_hash)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -428,6 +440,8 @@ def persist_contextual_translation_result(
         character_profiles=character_profiles,
         relationship_profiles=relationship_profiles,
         analyses=analyses,
+        route_decisions=route_decisions,
+        metrics=metrics,
     )
     cache_path = cache_dir / "contextual_translation.json"
     cache_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

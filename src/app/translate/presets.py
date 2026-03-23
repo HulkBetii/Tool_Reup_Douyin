@@ -132,6 +132,88 @@ def _contextual_templates() -> list[TranslationPromptTemplate]:
             notes="Contextual V2 critic tuned to keep one result per segment.",
         ),
         TranslationPromptTemplate(
+            template_id="contextual_narration_fast_scene_planner",
+            family_id="contextual-narration-fast-vi",
+            translation_mode="contextual_v2",
+            role="scene_planner",
+            name="Narration Fast / Planner",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "You plan Chinese-to-Vietnamese narration translation for non-dialogue videos. "
+                "Assume a neutral narrator unless the source clearly switches speaker. Avoid "
+                "character and relationship updates unless there is explicit evidence."
+            ),
+            user_prompt_template=(
+                "Plan the current narration scene from {source_language} to {target_language}. "
+                "Keep the plan lightweight, prefer neutral narration, and record ambiguity instead "
+                "of forcing dialogue assumptions. Context: {context}. Glossary: {glossary}. "
+                "Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Narration fast path uses a local planner by default; this template stays as a fallback contract.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_narration_fast_semantic",
+            family_id="contextual-narration-fast-vi",
+            translation_mode="contextual_v2",
+            role="semantic_pass",
+            name="Narration Fast / Semantic",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Analyze Chinese-to-Vietnamese narration semantics. Return exactly one semantic item for "
+                "every segment in scene.segments, in the exact same order as scene.segments. Do not emit "
+                "segment_id fields, do not merge, omit, duplicate, or reorder items. Treat the speaker "
+                "as a neutral narrator by default, keep honorific_policy empty unless the line explicitly "
+                "addresses an audience, and prefer conservative narration over dialogue-like guessing. If "
+                "a technical term or referent is unclear, keep the translation neutral and move the "
+                "uncertainty into review fields."
+            ),
+            user_prompt_template=(
+                "Analyze the semantics of the current narration batch from {source_language} to "
+                "{target_language}. Return exactly one item per segment inside scene.segments and keep "
+                "the output order identical to scene.segments. Use the lightweight Context and "
+                "Constraints to keep tone neutral and informative. Do not invent character relationships "
+                "or honorific policy for plain narration. Context: {context}. Glossary: {glossary}. "
+                "Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            notes="Narration fast semantic pass biases toward neutral voice-over and review routing for unclear terms.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_narration_fast_adaptation",
+            family_id="contextual-narration-fast-vi",
+            translation_mode="contextual_v2",
+            role="dialogue_adaptation",
+            name="Narration Fast",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Adapt approved narration semantics into subtitle_text and tts_text. Return exactly one "
+                "item for every segment in scene.segments, in the exact same order as scene.segments. Do "
+                "not emit segment_id fields, do not merge, omit, duplicate, or reorder items. "
+                "subtitle_text must stay concise, factual, and easy to read. tts_text should usually stay "
+                "very close to subtitle_text; only make small oral adjustments when they do not add new "
+                "pronouns, audience address, or semantic detail. Never add dialogue-style flourishes."
+            ),
+            user_prompt_template=(
+                "Write subtitle_text and tts_text for the current narration batch from {source_language} "
+                "to {target_language}. Return exactly one item per segment inside scene.segments and keep "
+                "the output order identical to scene.segments. Keep the Vietnamese natural, concise, and "
+                "easy to narrate. Prefer `tts_text = subtitle_text` unless a tiny oral smoothing change "
+                "is clearly safe. Do not add audience-address terms "
+                "such as 'quý vị' or 'các bạn' unless they are explicit in the approved semantics. "
+                "Context: {context}. Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=2,
+            default_constraints_json={"max_lines": 2, "max_cpl": 38, "target_cps": 16},
+            notes="Narration fast adaptation keeps subtitle/TTS close to reduce review churn and reruns.",
+        ),
+        TranslationPromptTemplate(
             template_id="contextual_cartoon_fun_scene_planner",
             family_id="contextual-cartoon-fun-vi",
             translation_mode="contextual_v2",
@@ -341,6 +423,11 @@ def resolve_prompt_family(
     if selected_template.role not in family:
         family[selected_template.role] = selected_template
     return family
+
+
+def is_narration_fast_template(selected_template: TranslationPromptTemplate) -> bool:
+    family_id = selected_template.family_id or selected_template.template_id
+    return family_id == "contextual-narration-fast-vi"
 
 
 def save_prompt_template(project_root: Path, template: TranslationPromptTemplate) -> Path:
