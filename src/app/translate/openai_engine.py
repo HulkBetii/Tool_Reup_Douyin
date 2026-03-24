@@ -13,6 +13,7 @@ from .models import (
     DialogueAdaptationBatchOutput,
     LLMCallMetric,
     NarrationAdaptationBatchOutput,
+    NarrationTermEntityBatchOutput,
     NarrationSemanticBatchOutput,
     ScenePlannerOutput,
     SemanticBatchOutput,
@@ -311,6 +312,45 @@ class OpenAITranslationEngine:
             scene_id=str(batch_payload.get("scene", {}).get("scene_id") or ""),
             batch_index=batch_payload.get("scene", {}).get("batch_index"),
             batch_count=batch_payload.get("scene", {}).get("batch_count"),
+        )
+
+    def extract_term_entities(
+        self,
+        context: JobContext,
+        *,
+        template: TranslationPromptTemplate,
+        scene_payload: dict[str, object],
+        source_language: str,
+        target_language: str,
+        context_payload: dict[str, object],
+        glossary_payload: dict[str, object],
+        model: str | None = None,
+        prompt_cache_key: str | None = None,
+        record_call: Callable[[LLMCallMetric], None] | None = None,
+        route_mode: str = "narration_fast",
+    ) -> NarrationTermEntityBatchOutput:
+        client = self._build_client()
+        selected_model = model or self._settings.default_translation_model
+        user_prompt = self._build_structured_user_prompt(
+            template=template,
+            source_payload=json.dumps(scene_payload, ensure_ascii=False, indent=2),
+            source_language=source_language,
+            target_language=target_language,
+            glossary_payload=json.dumps(glossary_payload, ensure_ascii=False, indent=2),
+            constraints_payload=json.dumps(template.default_constraints_json, ensure_ascii=False, indent=2),
+            context_payload=json.dumps(context_payload, ensure_ascii=False, indent=2),
+        )
+        context.report_progress(35, "Dang lap bang term/entity cho narration")
+        return self._call_structured_output(
+            client=client,
+            model=selected_model,
+            template=template,
+            user_prompt=user_prompt,
+            output_model=NarrationTermEntityBatchOutput,
+            prompt_cache_key=prompt_cache_key,
+            record_call=record_call,
+            route_mode=route_mode,
+            scene_id=str(scene_payload.get("scene_id") or ""),
         )
 
     def adapt_dialogue(

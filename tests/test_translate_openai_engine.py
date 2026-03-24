@@ -6,13 +6,19 @@ from app.translate.models import TranslationPromptTemplate
 from app.translate.openai_engine import OpenAITranslationEngine
 
 
-def _template(*, family_id: str = "contextual-narration-fast-vi", schema_version: int = 2) -> TranslationPromptTemplate:
+def _template(
+    *,
+    family_id: str = "contextual-narration-fast-vi",
+    schema_version: int = 2,
+    role: str = "dialogue_adaptation",
+    template_id: str = "contextual_narration_fast_adaptation",
+) -> TranslationPromptTemplate:
     return TranslationPromptTemplate(
-        template_id="contextual_narration_fast_adaptation",
+        template_id=template_id,
         name="Narration Fast",
         family_id=family_id,
         translation_mode="contextual_v2",
-        role="dialogue_adaptation",
+        role=role,
         category="narration",
         source_lang="zh",
         target_lang="vi",
@@ -83,6 +89,33 @@ def test_build_prompt_cache_key_changes_when_route_or_schema_changes() -> None:
 
     assert route_key != base_key
     assert schema_key != base_key
+
+
+def test_build_prompt_cache_key_changes_when_role_changes() -> None:
+    adaptation_template = _template()
+    term_template = _template(
+        role="term_entity_pass",
+        template_id="contextual_narration_fast_term_entity",
+    )
+
+    adaptation_key = OpenAITranslationEngine.build_prompt_cache_key(
+        template=adaptation_template,
+        model="gpt-5.4",
+        source_language="zh",
+        target_language="vi",
+        route_mode="narration_fast",
+        project_profile_id="zh-vi-narration-fast-vieneu",
+    )
+    term_key = OpenAITranslationEngine.build_prompt_cache_key(
+        template=term_template,
+        model="gpt-5.4",
+        source_language="zh",
+        target_language="vi",
+        route_mode="narration_fast",
+        project_profile_id="zh-vi-narration-fast-vieneu",
+    )
+
+    assert term_key != adaptation_key
 
 
 def test_build_structured_user_prompt_keeps_stable_prefix_layout() -> None:

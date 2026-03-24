@@ -226,6 +226,7 @@ def main() -> int:
         analyses=contextual_result["segment_analyses"],
         route_decisions=contextual_result.get("route_decisions"),
         metrics=contextual_result.get("metrics"),
+        term_entity_sheets=contextual_result.get("term_entity_sheets"),
     )
 
     review_reason_counts, review_samples = _review_samples(database, workspace.project_id)
@@ -241,6 +242,10 @@ def main() -> int:
         "route_decisions": [
             item.model_dump(mode="json") if hasattr(item, "model_dump") else item
             for item in contextual_result.get("route_decisions", [])
+        ],
+        "term_entity_sheets": [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in contextual_result.get("term_entity_sheets", [])
         ],
         "metrics": (
             contextual_result["metrics"].model_dump(mode="json")

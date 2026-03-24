@@ -184,6 +184,40 @@ def _contextual_templates() -> list[TranslationPromptTemplate]:
             notes="Narration fast semantic pass biases toward neutral voice-over and review routing for unclear terms.",
         ),
         TranslationPromptTemplate(
+            template_id="contextual_narration_fast_term_entity",
+            family_id="contextual-narration-fast-vi",
+            translation_mode="contextual_v2",
+            role="term_entity_pass",
+            name="Narration Fast / Terms",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Review a Chinese-to-Vietnamese narration scene and extract only the recurring or "
+                "meaning-critical technical terms and named entities that should stay stable across "
+                "the scene. Return at most 6 items. Use zero-based segment_positions that point to the "
+                "matching entries inside scene.segments. Use status='prefer' when a stable Vietnamese "
+                "rendering is safe enough to reuse. Use status='needs_review' only when the term or "
+                "entity is important and still too uncertain to recommend confidently. If nothing needs "
+                "special handling, return an empty items list."
+            ),
+            user_prompt_template=(
+                "Build a lightweight term/entity sheet for the current narration scene from "
+                "{source_language} to {target_language}. Focus on recurring technical terms, scientific "
+                "labels, proper names, and other meaning-critical nouns that could cause repeated drift "
+                "later. Keep the sheet short and practical. Use Context, Glossary, and Constraints for "
+                "existing stable choices, but do not invent certainty. Context: {context}. Glossary: "
+                "{glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=1,
+            default_constraints_json={
+                "max_items": 6,
+                "allow_empty": True,
+                "zero_based_segment_positions": True,
+            },
+            notes="Narration term/entity mini-pass builds a reusable term sheet before semantic/adaptation.",
+        ),
+        TranslationPromptTemplate(
             template_id="contextual_narration_fast_adaptation",
             family_id="contextual-narration-fast-vi",
             translation_mode="contextual_v2",

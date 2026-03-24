@@ -28,6 +28,10 @@ Current built-in profile:
     - route theo `scene`, khong ep ca video di cung mot duong
     - scene narration ro rang se di `Narration Fast Path`
     - scene hoi thoai hoac borderline se fallback sang dialogue path day du
+    - scene narration co the chay `term/entity mini-pass` scene-level truoc semantic/adaptation
+    - mini-pass tao `narration_term_sheet` nhe de giu cach goi thuat ngu/thuc the on dinh trong scene
+    - neu model bo trong `segment_positions`, runtime se fallback anchor `source_term -> source_text` de review hint van bam dung segment
+    - neu mini-pass danh dau mot term trung tam la `needs_review`, runtime se route dung segment do sang review thay vi doan nghia
     - narration batches dung structured output theo vi tri, khong phu thuoc `segment_id`
     - bo qua LLM scene planner cho scene narration
     - bo qua semantic critic cho scene narration

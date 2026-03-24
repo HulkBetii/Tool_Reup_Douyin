@@ -275,6 +275,7 @@ def _build_glossary_payload(
     project_id: str,
     *,
     relationship_rows: list[object] | None = None,
+    narration_term_sheet: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     glossary_entries: list[dict[str, str]] = []
     rows = relationship_rows if relationship_rows is not None else database.list_relationship_profiles(project_id)
@@ -301,7 +302,10 @@ def _build_glossary_payload(
                     "default_address_term": row["default_address_term"] or "",
                 }
             )
-    return {"relationship_glossary": glossary_entries}
+    payload: dict[str, object] = {"relationship_glossary": glossary_entries}
+    if narration_term_sheet is not None:
+        payload["narration_term_sheet"] = list(narration_term_sheet)
+    return payload
 
 
 def _relationship_defaults_map(database: ProjectDatabase, project_id: str) -> dict[tuple[str, str], dict[str, object]]:
@@ -396,6 +400,7 @@ def _cache_payload(
     analyses: list[SegmentAnalysisRecord],
     route_decisions: list[object] | None = None,
     metrics: object | None = None,
+    term_entity_sheets: list[object] | None = None,
 ) -> dict[str, object]:
     payload = {
         "stage_hash": stage_hash,
@@ -414,6 +419,11 @@ def _cache_payload(
         ]
     if metrics is not None:
         payload["metrics"] = metrics.model_dump(mode="json") if hasattr(metrics, "model_dump") else metrics
+    if term_entity_sheets is not None:
+        payload["term_entity_sheets"] = [
+            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
+            for item in term_entity_sheets
+        ]
     return payload
 
 
@@ -430,6 +440,7 @@ def persist_contextual_translation_result(
     analyses: list[SegmentAnalysisRecord],
     route_decisions: list[object] | None = None,
     metrics: object | None = None,
+    term_entity_sheets: list[object] | None = None,
 ) -> Path:
     cache_dir = _cache_dir(workspace, stage_hash)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -442,6 +453,7 @@ def persist_contextual_translation_result(
         analyses=analyses,
         route_decisions=route_decisions,
         metrics=metrics,
+        term_entity_sheets=term_entity_sheets,
     )
     cache_path = cache_dir / "contextual_translation.json"
     cache_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")

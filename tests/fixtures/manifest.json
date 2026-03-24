@@ -52,6 +52,28 @@
       "notes": "Narration positional structured output co the tra thieu items tren batch semantic lon. Runtime phai tu downshift batch size cho cac batch narration con lai thay vi tiep tuc retry batch 16 roi split lap lai."
     },
     {
+      "fixture_id": "zh-vi-narration-term-entity-mini-pass",
+      "class": "narration_term_entity_scene_term_sheet",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "translation",
+      "path": "tests/fixtures/regression/zh-vi-narration-term-entity-mini-pass.json",
+      "notes": "Narration fast path co them mini-pass scene-level de chot term/entity sheet truoc semantic/adaptation. Neu mot term trung tam van qua mo ho, runtime phai route segment do sang review thay vi tiep tuc doan."
+    },
+    {
+      "fixture_id": "zh-vi-narration-term-entity-anchor-fallback",
+      "class": "narration_term_entity_anchor_fallback",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "translation",
+      "path": "tests/fixtures/regression/zh-vi-narration-term-entity-anchor-fallback.json",
+      "notes": "Narration term/entity mini-pass co the bo trong segment_positions. Runtime phai fallback anchor source_term ve segment co source_text hop le de review hint khong bi roi."
+    },
+    {
       "fixture_id": "zh-vi-register-voice-style-fallback",
       "class": "register_voice_style_fallback",
       "languages": [

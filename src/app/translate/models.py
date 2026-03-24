@@ -269,6 +269,45 @@ class NarrationAdaptationBatchOutput(BaseModel):
     items: list[NarrationAdaptationItem]
 
 
+class NarrationTermEntityItem(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    source_term: str
+    preferred_vi: str = ""
+    category: str = "term"
+    status: str = "prefer"
+    confidence: float = 0.0
+    segment_positions: list[int] = Field(default_factory=list)
+    notes: str = ""
+
+
+class NarrationTermEntityBatchOutput(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    items: list[NarrationTermEntityItem] = Field(default_factory=list)
+
+
+class ResolvedNarrationTermEntityItem(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    source_term: str
+    preferred_vi: str = ""
+    category: str = "term"
+    status: str = "prefer"
+    confidence: float = 0.0
+    segment_ids: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
+class SceneTermEntitySheet(BaseModel):
+    model_config = STRICT_MODEL_CONFIG
+
+    scene_id: str
+    route_mode: str = "narration_fast"
+    active: bool = True
+    items: list[ResolvedNarrationTermEntityItem] = Field(default_factory=list)
+
+
 class SemanticCriticIssue(BaseModel):
     model_config = STRICT_MODEL_CONFIG
 
@@ -333,4 +372,7 @@ class ContextualRunMetrics(BaseModel):
     llm_retry_count: int = 0
     batch_count: int = 0
     narration_batch_size_caps: dict[str, int] = Field(default_factory=dict)
+    term_entity_pass_scene_count: int = 0
+    term_entity_entry_count: int = 0
+    term_entity_review_hint_count: int = 0
     call_metrics: list[LLMCallMetric] = Field(default_factory=list)

@@ -1,0 +1,48 @@
+{
+  "fixture_id": "zh-vi-narration-term-entity-anchor-fallback",
+  "scene_id": "scene_term_anchor_0001",
+  "segments": [
+    {
+      "segment_id": "seg-001",
+      "segment_index": 0,
+      "start_ms": 0,
+      "end_ms": 900,
+      "source_text": "科学家把这种结构称为深海声散射层，它会在夜间整体上移。"
+    },
+    {
+      "segment_id": "seg-002",
+      "segment_index": 1,
+      "start_ms": 1000,
+      "end_ms": 1900,
+      "source_text": "深海声散射层每天都在移动，也会改变声纳回波。"
+    },
+    {
+      "segment_id": "seg-003",
+      "segment_index": 2,
+      "start_ms": 2000,
+      "end_ms": 2900,
+      "source_text": "一种名叫X17层的深层结构仍然没有公认的稳定译名。"
+    }
+  ],
+  "term_sheet": [
+    {
+      "source_term": "深海声散射层",
+      "preferred_vi": "lớp tán xạ âm sâu",
+      "category": "technical_term",
+      "status": "prefer",
+      "confidence": 0.93,
+      "segment_positions": [],
+      "notes": "Model bỏ trống vị trí nhưng source_term xuất hiện rõ trong source_text."
+    },
+    {
+      "source_term": "X17层",
+      "preferred_vi": "",
+      "category": "geologic_layer",
+      "status": "needs_review",
+      "confidence": 0.34,
+      "segment_positions": [],
+      "notes": "Model bỏ trống vị trí; runtime phải fallback anchor term này về đúng segment để route review."
+    }
+  ],
+  "notes": "Narration mini-pass có thể trả term/entity sheet tốt nhưng bỏ trống segment_positions. Runtime phải fallback anchor bằng source_term -> source_text match thay vì làm rơi review hint."
+}

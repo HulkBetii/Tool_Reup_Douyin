@@ -68,6 +68,7 @@ This is a practical working map for regression-first debugging.
   - runtime note:
     - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py) is also the hook for stage-batch resilience. It should split batches not only for mismatched ids, but also for retryable structured-output parse failures on large scene batches.
     - narration routing now happens per-scene inside [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py): narration-like scenes use deterministic planner + positional structured outputs, while dialogue/borderline scenes fall back to the full dialogue path.
+    - narration scenes may also run a lightweight `term/entity mini-pass` before semantic/adaptation. The resulting scene-level term sheet is injected back into narration glossary payloads, and `needs_review` term hints should route the affected segments to review instead of silent guessing.
     - [src/app/translate/openai_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\openai_engine.py) now builds stable `prompt_cache_key` values and uses a fixed prompt section order (`constraints -> context -> glossary -> source`) to maximize prompt-cache reuse.
 
 - subtitle

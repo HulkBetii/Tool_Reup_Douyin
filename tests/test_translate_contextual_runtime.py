@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,6 +12,7 @@ from app.project.bootstrap import bootstrap_project
 from app.project.database import ProjectDatabase
 from app.project.models import ProjectInitRequest
 from app.translate.contextual_runtime import (
+    _fallback_term_anchor_segment_ids,
     _normalize_review_reason_code,
     _route_scene,
     _run_stage_batch_with_positional_retry,
@@ -28,6 +30,8 @@ from app.translate.models import (
     NarrationAdaptationItem,
     NarrationSemanticAnalysisItem,
     NarrationSemanticBatchOutput,
+    NarrationTermEntityBatchOutput,
+    NarrationTermEntityItem,
     RegisterDecision,
     ResolvedEllipsis,
     ScenePlannerOutput,
@@ -236,6 +240,28 @@ def test_route_scene_uses_dialogue_fallback_for_borderline_scene() -> None:
     assert decision.route_mode == "dialogue"
     assert decision.fallback_reason == "borderline_narration_score"
     assert 0.45 < decision.narration_score < 0.75
+
+
+def test_fallback_term_anchor_accepts_sqlite_rows() -> None:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("create table segments (segment_id text, source_text text)")
+        connection.executemany(
+            "insert into segments(segment_id, source_text) values (?, ?)",
+            [
+                ("seg-001", "科学家把这种结构称为深海声散射层，它会在夜间整体上移。"),
+                ("seg-002", "深海声散射层每天都在移动，也会改变声纳回波。"),
+                ("seg-003", "一种名叫X17层的深层结构仍然没有公认的稳定译名。"),
+            ],
+        )
+        rows = connection.execute("select segment_id, source_text from segments order by rowid").fetchall()
+    finally:
+        connection.close()
+
+    scene = SimpleNamespace(segments=rows)
+    assert _fallback_term_anchor_segment_ids(scene, "深海声散射层") == ["seg-001", "seg-002"]
+    assert _fallback_term_anchor_segment_ids(scene, "X17层") == ["seg-003"]
 
 
 def test_run_stage_batch_with_positional_retry_retries_same_batch_before_split() -> None:
@@ -497,6 +523,272 @@ def test_run_contextual_translation_uses_narration_fast_path(monkeypatch, tmp_pa
     assert engine.context_relationship_profile_counts == [0]
     assert engine.glossary_counts == [0]
     assert result["semantic_qc"]["error_count"] == 0
+
+
+class _NarrationTermSheetEngine:
+    def __init__(self, fixture: dict[str, object]) -> None:
+        self.fixture = fixture
+        self.term_pass_calls = 0
+        self.semantic_glossaries: list[dict[str, object]] = []
+        self.adaptation_glossaries: list[dict[str, object]] = []
+
+    def plan_scene(self, *_args, **_kwargs):
+        raise AssertionError("Narration fast path should not call the LLM scene planner")
+
+    def extract_term_entities(self, _context, **_kwargs):
+        self.term_pass_calls += 1
+        return NarrationTermEntityBatchOutput(
+            items=[NarrationTermEntityItem.model_validate(item) for item in self.fixture["term_sheet"]]
+        )
+
+    def analyze_semantics(self, _context, **kwargs):
+        self.semantic_glossaries.append(dict(kwargs["glossary_payload"]))
+        scene_segments = list(kwargs["batch_payload"]["scene"]["segments"])
+        return NarrationSemanticBatchOutput(
+            items=[
+                NarrationSemanticAnalysisItem(
+                    speaker=SpeakerDecision(character_id="narrator", source="narration", confidence=0.99),
+                    listeners=[ListenerDecision(character_id="audience", role="audience", confidence=0.99)],
+                    turn_function="inform",
+                    register=RegisterDecision(
+                        politeness="neutral",
+                        power_direction="neutral",
+                        emotional_tone="informative",
+                        confidence=0.95,
+                    ),
+                    resolved_ellipsis=ResolvedEllipsis(confidence=0.9),
+                    honorific_policy=HonorificPolicy(),
+                    semantic_translation=f"VI {item['segment_index']}",
+                    glossary_hits=[],
+                    risk_flags=[],
+                    confidence=ConfidenceBreakdown(
+                        overall=0.92,
+                        speaker=0.99,
+                        listener=0.99,
+                        register=0.95,
+                        relation=0.0,
+                        translation=0.9,
+                    ),
+                    needs_human_review=False,
+                    review_reason_codes=[],
+                    review_question="",
+                )
+                for item in scene_segments
+            ]
+        )
+
+    def adapt_dialogue(self, _context, **kwargs):
+        self.adaptation_glossaries.append(dict(kwargs["glossary_payload"]))
+        scene_segments = list(kwargs["batch_payload"]["scene"]["segments"])
+        return NarrationAdaptationBatchOutput(
+            items=[
+                NarrationAdaptationItem(
+                    honorific_policy=HonorificPolicy(),
+                    subtitle_text=f"VI {item['segment_index']}",
+                    tts_text=f"VI {item['segment_index']}",
+                    risk_flags=[],
+                    needs_human_review=False,
+                    review_reason_codes=[],
+                )
+                for item in scene_segments
+            ]
+        )
+
+    def critique_dialogue(self, *_args, **_kwargs):
+        raise AssertionError("Narration fast path should not call semantic critic")
+
+
+def test_run_contextual_translation_builds_narration_term_sheet_and_routes_review(monkeypatch, tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-narration-term-entity-mini-pass.json")
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Term Sheet Runtime",
+            root_dir=tmp_path / "narration-term-sheet-runtime",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-vieneu",
+        )
+    )
+    database = ProjectDatabase(workspace.database_path)
+    selected_template = load_prompt_template(workspace.root_dir, "contextual_narration_fast_adaptation")
+    context = _DummyContext()
+    engine = _NarrationTermSheetEngine(fixture)
+
+    segments = list(fixture["segments"])
+    scene = SceneChunk(
+        scene_id=str(fixture["scene_id"]),
+        scene_index=0,
+        start_segment_index=0,
+        end_segment_index=len(segments) - 1,
+        start_ms=0,
+        end_ms=int(segments[-1]["end_ms"]),
+        segment_ids=[str(row["segment_id"]) for row in segments],
+        segments=segments,
+    )
+    monkeypatch.setattr(
+        "app.translate.contextual_runtime.chunk_segments_into_scenes",
+        lambda _segments: [scene],
+    )
+
+    result = run_contextual_translation(
+        context,
+        workspace=workspace,
+        database=database,
+        engine=engine,
+        segments=segments,
+        selected_template=selected_template,
+        source_language="zh",
+        target_language="vi",
+        model="gpt-test",
+    )
+
+    assert engine.term_pass_calls == 1
+    assert len(engine.semantic_glossaries) == 1
+    assert len(engine.semantic_glossaries[0]["narration_term_sheet"]) == 2
+    assert len(engine.adaptation_glossaries[0]["narration_term_sheet"]) == 2
+    assert result["metrics"].term_entity_pass_scene_count == 1
+    assert result["metrics"].term_entity_entry_count == 2
+    assert result["metrics"].term_entity_review_hint_count == 1
+    assert result["fast_path"]["term_entity_pass"] == {
+        "scene_count": 1,
+        "entry_count": 2,
+        "review_hint_count": 1,
+    }
+    assert result["term_entity_sheets"][0].items[0].preferred_vi == "bơm carbon sinh học"
+    analyses_by_segment = {item.segment_id: item for item in result["segment_analyses"]}
+    assert analyses_by_segment["seg-001"].needs_human_review is False
+    assert analyses_by_segment["seg-002"].needs_human_review is False
+    assert analyses_by_segment["seg-003"].needs_human_review is True
+    assert "technical_term_uncertainty" in analyses_by_segment["seg-003"].review_reason_codes_json
+    assert "X17层" in analyses_by_segment["seg-003"].review_question
+
+
+def test_run_contextual_translation_falls_back_to_source_text_term_anchoring(monkeypatch, tmp_path: Path) -> None:
+    fixture = _load_regression_fixture("zh-vi-narration-term-entity-anchor-fallback.json")
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Term Anchor Runtime",
+            root_dir=tmp_path / "narration-term-anchor-runtime",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-vieneu",
+        )
+    )
+    database = ProjectDatabase(workspace.database_path)
+    selected_template = load_prompt_template(workspace.root_dir, "contextual_narration_fast_adaptation")
+    context = _DummyContext()
+    engine = _NarrationTermSheetEngine(fixture)
+
+    segments = list(fixture["segments"])
+    scene = SceneChunk(
+        scene_id=str(fixture["scene_id"]),
+        scene_index=0,
+        start_segment_index=0,
+        end_segment_index=len(segments) - 1,
+        start_ms=0,
+        end_ms=int(segments[-1]["end_ms"]),
+        segment_ids=[str(row["segment_id"]) for row in segments],
+        segments=segments,
+    )
+    monkeypatch.setattr(
+        "app.translate.contextual_runtime.chunk_segments_into_scenes",
+        lambda _segments: [scene],
+    )
+
+    result = run_contextual_translation(
+        context,
+        workspace=workspace,
+        database=database,
+        engine=engine,
+        segments=segments,
+        selected_template=selected_template,
+        source_language="zh",
+        target_language="vi",
+        model="gpt-test",
+    )
+
+    anchored_items = {item.source_term: item for item in result["term_entity_sheets"][0].items}
+    assert anchored_items["深海声散射层"].segment_ids == ["seg-001", "seg-002"]
+    assert anchored_items["X17层"].segment_ids == ["seg-003"]
+    analyses_by_segment = {item.segment_id: item for item in result["segment_analyses"]}
+    assert analyses_by_segment["seg-001"].needs_human_review is False
+    assert analyses_by_segment["seg-002"].needs_human_review is False
+    assert analyses_by_segment["seg-003"].needs_human_review is True
+    assert "technical_term_uncertainty" in analyses_by_segment["seg-003"].review_reason_codes_json
+    assert "X17层" in analyses_by_segment["seg-003"].review_question
+
+
+class _NarrationTermSheetSkipEngine(_NarrationFastPathEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.term_pass_calls = 0
+
+    def extract_term_entities(self, *_args, **_kwargs):
+        self.term_pass_calls += 1
+        return NarrationTermEntityBatchOutput(items=[])
+
+
+def test_run_contextual_translation_skips_term_sheet_for_simple_short_narration(monkeypatch, tmp_path: Path) -> None:
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Term Sheet Skip Runtime",
+            root_dir=tmp_path / "narration-term-sheet-skip-runtime",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-vieneu",
+        )
+    )
+    database = ProjectDatabase(workspace.database_path)
+    selected_template = load_prompt_template(workspace.root_dir, "contextual_narration_fast_adaptation")
+    context = _DummyContext()
+    engine = _NarrationTermSheetSkipEngine()
+
+    segments = [
+        {
+            "segment_id": "seg-a",
+            "segment_index": 0,
+            "start_ms": 0,
+            "end_ms": 900,
+            "source_text": "镜头继续下潜。",
+        },
+        {
+            "segment_id": "seg-b",
+            "segment_index": 1,
+            "start_ms": 1000,
+            "end_ms": 1900,
+            "source_text": "海水渐渐变暗。",
+        },
+    ]
+    scene = SceneChunk(
+        scene_id="scene_short_narration",
+        scene_index=0,
+        start_segment_index=0,
+        end_segment_index=1,
+        start_ms=0,
+        end_ms=1900,
+        segment_ids=["seg-a", "seg-b"],
+        segments=segments,
+    )
+    monkeypatch.setattr(
+        "app.translate.contextual_runtime.chunk_segments_into_scenes",
+        lambda _segments: [scene],
+    )
+
+    result = run_contextual_translation(
+        context,
+        workspace=workspace,
+        database=database,
+        engine=engine,
+        segments=segments,
+        selected_template=selected_template,
+        source_language="zh",
+        target_language="vi",
+        model="gpt-test",
+    )
+
+    assert engine.term_pass_calls == 0
+    assert result["metrics"].term_entity_pass_scene_count == 0
+    assert result["fast_path"]["term_entity_pass"]["scene_count"] == 0
 
 
 class _MixedRouteEngine:

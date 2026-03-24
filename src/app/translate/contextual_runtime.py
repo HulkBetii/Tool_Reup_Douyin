@@ -32,7 +32,10 @@ from .contextual_pipeline import (
 from .models import (
     ContextualRunMetrics,
     DialogueAdaptationBatchOutput,
+    NarrationTermEntityBatchOutput,
     NarrationAdaptationBatchOutput,
+    ResolvedNarrationTermEntityItem,
+    SceneTermEntitySheet,
     NarrationSemanticBatchOutput,
     ScenePlannerOutput,
     SceneRouteDecision,
@@ -59,6 +62,59 @@ _VOCATIVE_PATTERN = re.compile(r"(各位|大家|朋友们|兄弟们|姐妹们|�
 _BACKCHANNEL_PATTERN = re.compile(r"^(嗯|啊|哦|诶|欸|哎|呀|唉|好|行|对|是啊|对啊|嗯嗯)[！!。.\s]*$")
 
 
+_LATIN_OR_DIGIT_PATTERN = re.compile(r"[A-Za-z0-9]")
+_TERM_INTRO_PATTERNS = (
+    "称为",
+    "被称为",
+    "又称",
+    "叫做",
+    "学名",
+    "术语",
+    "结构",
+    "机制",
+    "现象",
+    "模型",
+)
+
+_TERM_ANCHOR_STRIP_CHARS = "\"'“”‘’《》〈〉「」『』()[]{}<>"
+
+
+def _normalize_term_anchor_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).casefold()
+
+
+def _row_value(row: Any, key: str) -> Any:
+    if isinstance(row, dict):
+        return row.get(key)
+    try:
+        return row[key]
+    except (KeyError, IndexError, TypeError):
+        getter = getattr(row, "get", None)
+        if callable(getter):
+            return getter(key)
+    return None
+
+
+def _fallback_term_anchor_segment_ids(scene, source_term: str) -> list[str]:
+    raw_term = str(source_term or "").strip().strip(_TERM_ANCHOR_STRIP_CHARS)
+    if not raw_term:
+        return []
+    normalized_term = _normalize_term_anchor_text(raw_term)
+    if len(normalized_term) < 2 and not _LATIN_OR_DIGIT_PATTERN.search(raw_term):
+        return []
+
+    resolved_segment_ids: list[str] = []
+    for row in scene.segments:
+        segment_id = str(row["segment_id"])
+        source_text = str(_row_value(row, "source_text") or "").strip()
+        if not source_text:
+            continue
+        if raw_term in source_text or normalized_term in _normalize_term_anchor_text(source_text):
+            if segment_id not in resolved_segment_ids:
+                resolved_segment_ids.append(segment_id)
+    return resolved_segment_ids
+
+
 def _normalize_review_reason_code(raw_code: str) -> str:
     text = raw_code.strip()
     if not text:
@@ -76,6 +132,8 @@ def _normalize_review_reason_code(raw_code: str) -> str:
         return "ambiguous_reference"
     if "tone" in lowered:
         return "tone_ambiguity"
+    if "technical" in lowered and "term" in lowered:
+        return "technical_term_uncertainty"
     if "term" in lowered or "meaning" in lowered or "ambiguousterm" in lowered:
         return "ambiguous_term"
     normalized = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
@@ -217,6 +275,74 @@ def _route_scene(
         long_sentence_ratio=round(long_sentence_ratio, 4),
         prior_review_penalty=round(prior_penalty, 4),
         fallback_reason=fallback_reason,
+    )
+
+
+def _should_run_narration_term_entity_pass(scene, route_decision: SceneRouteDecision) -> bool:
+    if route_decision.route_mode != "narration_fast":
+        return False
+    texts = [str(row["source_text"] or "").strip() for row in scene.segments]
+    nonempty_texts = [text for text in texts if text]
+    if len(nonempty_texts) < 2:
+        return False
+    total_chars = sum(len(text) for text in nonempty_texts)
+    intro_marker_hits = sum(1 for text in nonempty_texts if any(marker in text for marker in _TERM_INTRO_PATTERNS))
+    has_latin_or_digit = any(_LATIN_OR_DIGIT_PATTERN.search(text) for text in nonempty_texts)
+    return total_chars >= 72 and (
+        route_decision.long_sentence_ratio >= 0.35
+        or intro_marker_hits > 0
+        or has_latin_or_digit
+        or len(nonempty_texts) >= 6
+    )
+
+
+def _materialize_narration_term_sheet(
+    scene,
+    output: NarrationTermEntityBatchOutput,
+) -> SceneTermEntitySheet:
+    segment_ids = [str(row["segment_id"]) for row in scene.segments]
+    resolved_items: list[ResolvedNarrationTermEntityItem] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for raw_item in output.items:
+        source_term = str(raw_item.source_term or "").strip()
+        preferred_vi = str(raw_item.preferred_vi or "").strip()
+        if not source_term:
+            continue
+        normalized_status = str(raw_item.status or "").strip().lower()
+        if normalized_status not in {"prefer", "needs_review"}:
+            normalized_status = "prefer" if preferred_vi else "needs_review"
+        resolved_segment_ids: list[str] = []
+        for raw_position in raw_item.segment_positions:
+            try:
+                position = int(raw_position)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= position < len(segment_ids):
+                segment_id = segment_ids[position]
+                if segment_id not in resolved_segment_ids:
+                    resolved_segment_ids.append(segment_id)
+        if not resolved_segment_ids:
+            resolved_segment_ids = _fallback_term_anchor_segment_ids(scene, source_term)
+        dedupe_key = (source_term.casefold(), preferred_vi.casefold(), normalized_status)
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        resolved_items.append(
+            ResolvedNarrationTermEntityItem(
+                source_term=source_term,
+                preferred_vi=preferred_vi,
+                category=str(raw_item.category or "term").strip() or "term",
+                status=normalized_status,
+                confidence=max(0.0, min(1.0, float(raw_item.confidence or 0.0))),
+                segment_ids=resolved_segment_ids,
+                notes=str(raw_item.notes or "").strip(),
+            )
+        )
+    return SceneTermEntitySheet(
+        scene_id=scene.scene_id,
+        route_mode="narration_fast",
+        active=True,
+        items=resolved_items[:6],
     )
 
 
@@ -533,6 +659,7 @@ def run_contextual_translation(
     metrics = ContextualRunMetrics()
     narration_semantic_batch_cap = NARRATION_FAST_BATCH_SIZE
     narration_adaptation_batch_cap = NARRATION_FAST_BATCH_SIZE
+    term_entity_sheets: list[SceneTermEntitySheet] = []
     metrics.narration_batch_size_caps = {
         "semantic_pass": narration_semantic_batch_cap,
         "dialogue_adaptation": narration_adaptation_batch_cap,
@@ -683,6 +810,69 @@ def run_contextual_translation(
             )
         scene_context_character_rows = [] if scene_is_narration_fast else list(character_profiles.values())
         scene_context_relationship_rows = [] if scene_is_narration_fast else list(relationship_profiles.values())
+        narration_term_sheet = SceneTermEntitySheet(
+            scene_id=scene.scene_id,
+            route_mode=scene_route_mode,
+            active=False,
+            items=[],
+        )
+        term_review_hints_by_segment: dict[str, list[str]] = {}
+        if (
+            scene_is_narration_fast
+            and "term_entity_pass" in active_prompt_family
+            and hasattr(engine, "extract_term_entities")
+            and _should_run_narration_term_entity_pass(scene, route_decision)
+        ):
+            metrics.batch_count += 1
+            metrics.term_entity_pass_scene_count += 1
+            term_prompt_cache_key = OpenAITranslationEngine.build_prompt_cache_key(
+                template=active_prompt_family["term_entity_pass"],
+                model=model,
+                source_language=source_language,
+                target_language=target_language,
+                route_mode=scene_route_mode,
+                project_profile_id=project_profile_id,
+            )
+            term_output = engine.extract_term_entities(
+                context,
+                template=active_prompt_family["term_entity_pass"],
+                scene_payload={
+                    **_scene_row_payload(scene),
+                    "scene_plan": planner_output.model_dump(mode="json", by_alias=True),
+                },
+                source_language=source_language,
+                target_language=target_language,
+                context_payload=_build_context_payload(
+                    scene=scene,
+                    planner_summary=planner_output.scene_summary,
+                    existing_character_rows=scene_context_character_rows,
+                    existing_relationship_rows=scene_context_relationship_rows,
+                ),
+                glossary_payload=_build_glossary_payload(
+                    database,
+                    workspace.project_id,
+                    relationship_rows=scene_context_relationship_rows,
+                ),
+                model=model,
+                prompt_cache_key=term_prompt_cache_key,
+                record_call=_record_call,
+                route_mode=scene_route_mode,
+            )
+            narration_term_sheet = _materialize_narration_term_sheet(scene, term_output)
+            narration_term_sheet.active = True
+            metrics.term_entity_entry_count += len(narration_term_sheet.items)
+            term_entity_sheets.append(narration_term_sheet)
+            for item in narration_term_sheet.items:
+                if item.status != "needs_review":
+                    continue
+                metrics.term_entity_review_hint_count += 1
+                for segment_id in item.segment_ids:
+                    term_review_hints_by_segment.setdefault(segment_id, []).append(item.source_term)
+        narration_term_sheet_payload = (
+            [item.model_dump(mode="json") for item in narration_term_sheet.items]
+            if narration_term_sheet.active
+            else None
+        )
         scene_batches = None
         if not scene_is_narration_fast:
             scene_batches = _chunk_scene_segments(
@@ -750,6 +940,7 @@ def run_contextual_translation(
                             database,
                             workspace.project_id,
                             relationship_rows=scene_context_relationship_rows,
+                            narration_term_sheet=narration_term_sheet_payload,
                         ),
                         model=model,
                         output_model=semantic_output_model,
@@ -803,6 +994,7 @@ def run_contextual_translation(
                             database,
                             workspace.project_id,
                             relationship_rows=scene_context_relationship_rows,
+                            narration_term_sheet=narration_term_sheet_payload,
                         ),
                         model=model,
                         output_model=semantic_output_model,
@@ -899,6 +1091,7 @@ def run_contextual_translation(
                             database,
                             workspace.project_id,
                             relationship_rows=scene_context_relationship_rows,
+                            narration_term_sheet=narration_term_sheet_payload,
                         ),
                         model=model,
                         output_model=adaptation_output_model,
@@ -956,6 +1149,7 @@ def run_contextual_translation(
                             database,
                             workspace.project_id,
                             relationship_rows=scene_context_relationship_rows,
+                            narration_term_sheet=narration_term_sheet_payload,
                         ),
                         model=model,
                         output_model=adaptation_output_model,
@@ -1064,6 +1258,7 @@ def run_contextual_translation(
             critic_item = critic_items.get(segment_id)
             critic_issues = []
             review_reason_codes = list(semantic_item.review_reason_codes)
+            term_review_hints = list(dict.fromkeys(term_review_hints_by_segment.get(segment_id, [])))
             for code in adaptation_item.review_reason_codes:
                 if code not in review_reason_codes:
                     review_reason_codes.append(code)
@@ -1072,13 +1267,19 @@ def run_contextual_translation(
                     if code not in review_reason_codes:
                         review_reason_codes.append(code)
                 critic_issues = [item.model_dump(mode="json", by_alias=True) for item in critic_item.issues]
+            if term_review_hints and "technical_term_uncertainty" not in review_reason_codes:
+                review_reason_codes.append("technical_term_uncertainty")
             review_reason_codes = [_normalize_review_reason_code(code) for code in review_reason_codes]
             review_reason_codes = list(dict.fromkeys(review_reason_codes))
             needs_review = (
                 semantic_item.needs_human_review
                 or adaptation_item.needs_human_review
                 or bool(getattr(critic_item, "review_needed", False))
+                or bool(term_review_hints)
             )
+            merged_risk_flags = list(dict.fromkeys(list(semantic_item.risk_flags) + list(adaptation_item.risk_flags)))
+            if term_review_hints and "term_entity_review_hint" not in merged_risk_flags:
+                merged_risk_flags.append("term_entity_review_hint")
             analyses.append(
                 SegmentAnalysisRecord(
                     segment_id=segment_id,
@@ -1093,12 +1294,19 @@ def run_contextual_translation(
                     honorific_policy_json=adaptation_item.honorific_policy.model_dump(mode="json", by_alias=True),
                     semantic_translation=semantic_item.semantic_translation,
                     glossary_hits_json=list(semantic_item.glossary_hits),
-                    risk_flags_json=list(dict.fromkeys(list(semantic_item.risk_flags) + list(adaptation_item.risk_flags))),
+                    risk_flags_json=merged_risk_flags,
                     confidence_json=semantic_item.confidence.model_dump(mode="json", by_alias=True),
                     needs_human_review=needs_review,
                     review_status="needs_review" if needs_review else "approved",
                     review_reason_codes_json=review_reason_codes,
-                    review_question=semantic_item.review_question,
+                    review_question=(
+                        semantic_item.review_question
+                        or (
+                            f"Thuat ngu/thuc the chua du chac de chot: {', '.join(term_review_hints)}."
+                            if term_review_hints
+                            else ""
+                        )
+                    ),
                     approved_subtitle_text=adaptation_item.subtitle_text.strip(),
                     approved_tts_text=adaptation_item.tts_text.strip(),
                     semantic_qc_passed=not critic_issues,
@@ -1195,6 +1403,7 @@ def run_contextual_translation(
         "relationship_profiles": list(relationship_profiles.values()),
         "segment_analyses": patched_analyses,
         "route_decisions": route_decisions,
+        "term_entity_sheets": term_entity_sheets,
         "metrics": metrics,
         "fast_path": {
             "active": any_narration_fast,
@@ -1212,6 +1421,11 @@ def run_contextual_translation(
             "route_counts": {
                 "narration_fast": narration_scene_count,
                 "dialogue": len(route_decisions) - narration_scene_count,
+            },
+            "term_entity_pass": {
+                "scene_count": metrics.term_entity_pass_scene_count,
+                "entry_count": metrics.term_entity_entry_count,
+                "review_hint_count": metrics.term_entity_review_hint_count,
             },
         },
         "semantic_qc": {

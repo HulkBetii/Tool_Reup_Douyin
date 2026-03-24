@@ -1,0 +1,53 @@
+{
+  "fixture_id": "zh-vi-narration-term-entity-mini-pass",
+  "scene_id": "scene_term_sheet_0001",
+  "segments": [
+    {
+      "segment_id": "seg-001",
+      "segment_index": 0,
+      "start_ms": 0,
+      "end_ms": 900,
+      "source_text": "科学家把这种机制称为生物碳泵，它会持续把表层碳输送到深海。"
+    },
+    {
+      "segment_id": "seg-002",
+      "segment_index": 1,
+      "start_ms": 1000,
+      "end_ms": 1900,
+      "source_text": "生物碳泵会影响深海中的碳循环，也会改变声纳观察到的回波。"
+    },
+    {
+      "segment_id": "seg-003",
+      "segment_index": 2,
+      "start_ms": 2000,
+      "end_ms": 2900,
+      "source_text": "一种名叫X17层的深层结构仍然没有公认的稳定译名。"
+    }
+  ],
+  "term_sheet": [
+    {
+      "source_term": "生物碳泵",
+      "preferred_vi": "bơm carbon sinh học",
+      "category": "technical_term",
+      "status": "prefer",
+      "confidence": 0.94,
+      "segment_positions": [
+        0,
+        1
+      ],
+      "notes": "Giữ một cách gọi ổn định trên toàn scene."
+    },
+    {
+      "source_term": "X17层",
+      "preferred_vi": "",
+      "category": "geologic_layer",
+      "status": "needs_review",
+      "confidence": 0.38,
+      "segment_positions": [
+        2
+      ],
+      "notes": "Thuật ngữ trung tâm nhưng chưa đủ chắc để chốt cách gọi."
+    }
+  ],
+  "notes": "Narration term/entity mini-pass cần bơm term sheet vào glossary và route review cho các term trọng yếu chưa đủ chắc."
+}
