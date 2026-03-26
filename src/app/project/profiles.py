@@ -37,6 +37,10 @@ class ProjectProfileState(BaseModel):
     active_watermark_profile_id: str | None = None
     recommended_original_volume: float | None = None
     recommended_voice_volume: float | None = None
+    subtitle_subtext_mode: str = "off"
+
+
+VALID_SUBTITLE_SUBTEXT_MODES = {"off", "source_text"}
 
 
 def get_project_profiles_dir(project_root: Path) -> Path:
@@ -135,7 +139,54 @@ def _default_project_profiles() -> list[ProjectProfile]:
                 "Uu tien narration trung tinh, giam token/call va giam review gia do memory dialogue."
             ),
         ),
+        ProjectProfile(
+            project_profile_id="zh-vi-narration-fast-v2-vieneu",
+            name="Narration Fast V2 VieNeu",
+            description=(
+                "Preset zh->vi cho video thuyet minh dai: span-based, canonical-only narration, "
+                "subtext mac dinh tat, sparse escalation va budget governor."
+            ),
+            source_language="zh",
+            target_language="vi",
+            translation_mode="contextual_v2",
+            recommended_prompt_template_id="contextual_narration_slot_rewrite",
+            active_voice_preset_id="vieneu-default-vi",
+            active_export_preset_id="youtube-16x9",
+            active_watermark_profile_id="watermark-none",
+            recommended_original_volume=0.07,
+            recommended_voice_volume=1.0,
+            voice_preset_overrides={
+                "vieneu-default-vi": {
+                    "speed": 0.93,
+                    "volume": 1.0,
+                    "pitch": 0.0,
+                    "sample_rate": 24000,
+                    "language": "vi",
+                    "notes": (
+                        "VieNeu cham nhe cho narration fast v2 zh->vi, uu tien de nghe "
+                        "va giam can goi adaptation LLM."
+                    ),
+                }
+            },
+            style_preset_overrides={
+                "default-ass": {
+                    "FontSize": 12,
+                    "Outline": 2,
+                    "Shadow": 0,
+                    "Alignment": 2,
+                    "MarginV": 48,
+                }
+            },
+            notes=(
+                "Narration Fast Path v2: span-based, canonical_text only, sparse escalation, "
+                "term memory, budget governor <= 0.30 USD va subtext goc mac dinh tat."
+            ),
+        ),
     ]
+
+
+def default_project_profiles() -> list[ProjectProfile]:
+    return [profile.model_copy(deep=True) for profile in _default_project_profiles()]
 
 
 def ensure_project_profiles(project_root: Path) -> list[Path]:
@@ -143,7 +194,7 @@ def ensure_project_profiles(project_root: Path) -> list[Path]:
     profiles_dir.mkdir(parents=True, exist_ok=True)
     written_paths: list[Path] = []
     existing_ids = {path.stem for path in profiles_dir.glob("*.json")}
-    for profile in _default_project_profiles():
+    for profile in default_project_profiles():
         path = profiles_dir / f"{profile.project_profile_id}.json"
         if profile.project_profile_id in existing_ids and path.exists():
             continue
@@ -182,9 +233,71 @@ def load_project_profile_state(project_root: Path) -> ProjectProfileState | None
         return None
     try:
         payload = json.loads(state_path.read_text(encoding="utf-8"))
+        payload["subtitle_subtext_mode"] = normalize_subtitle_subtext_mode(
+            payload.get("subtitle_subtext_mode")
+        )
         return ProjectProfileState.model_validate(payload)
     except Exception:
         return None
+
+
+def normalize_subtitle_subtext_mode(value: object) -> str:
+    raw_value = str(value or "off").strip().lower()
+    if raw_value not in VALID_SUBTITLE_SUBTEXT_MODES:
+        return "off"
+    return raw_value
+
+
+def save_project_profile_state(project_root: Path, state: ProjectProfileState) -> ProjectProfileState:
+    normalized_state = state.model_copy(
+        update={"subtitle_subtext_mode": normalize_subtitle_subtext_mode(state.subtitle_subtext_mode)}
+    )
+    state_path = get_project_profile_state_path(project_root)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(normalized_state.model_dump(mode="json"), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return normalized_state
+
+
+def ensure_project_profile_state(
+    project_root: Path,
+    *,
+    project_profile_id: str | None = None,
+    name: str | None = None,
+    applied_at: str | None = None,
+) -> ProjectProfileState:
+    existing_state = load_project_profile_state(project_root)
+    if existing_state is not None:
+        return save_project_profile_state(project_root, existing_state)
+    resolved_profile_id = project_profile_id or "manual"
+    resolved_name = name or resolved_profile_id
+    state = ProjectProfileState(
+        project_profile_id=resolved_profile_id,
+        name=resolved_name,
+        applied_at=applied_at or "",
+        subtitle_subtext_mode="off",
+    )
+    return save_project_profile_state(project_root, state)
+
+
+def set_project_subtitle_subtext_mode(project_root: Path, mode: str, *, applied_at: str = "") -> ProjectProfileState:
+    state = ensure_project_profile_state(project_root, applied_at=applied_at)
+    updated_state = state.model_copy(
+        update={
+            "subtitle_subtext_mode": normalize_subtitle_subtext_mode(mode),
+            "applied_at": applied_at or state.applied_at,
+        }
+    )
+    return save_project_profile_state(project_root, updated_state)
+
+
+def resolve_subtitle_subtext_mode(project_root: Path) -> str:
+    state = load_project_profile_state(project_root)
+    if state is None:
+        return "off"
+    return normalize_subtitle_subtext_mode(state.subtitle_subtext_mode)
 
 
 def resolve_project_profile_mix_defaults(
@@ -259,6 +372,7 @@ def apply_project_profile(
     applied_at: str,
 ) -> ProjectProfileState:
     profile = load_project_profile(project_root, project_profile_id)
+    existing_state = load_project_profile_state(project_root)
     _apply_voice_preset_overrides(project_root, profile)
     _apply_style_preset_overrides(project_root, profile)
 
@@ -293,11 +407,10 @@ def apply_project_profile(
         active_watermark_profile_id=profile.active_watermark_profile_id,
         recommended_original_volume=profile.recommended_original_volume,
         recommended_voice_volume=profile.recommended_voice_volume,
+        subtitle_subtext_mode=(
+            existing_state.subtitle_subtext_mode
+            if existing_state is not None
+            else "off"
+        ),
     )
-    state_path = get_project_profile_state_path(project_root)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(state.model_dump(mode="json"), indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return state
+    return save_project_profile_state(project_root, state)

@@ -12,7 +12,11 @@ from .models import (
     BatchTranslationOutput,
     DialogueAdaptationBatchOutput,
     LLMCallMetric,
+    NarrationAmbiguityMicroOutput,
     NarrationAdaptationBatchOutput,
+    NarrationCanonicalSpanOutput,
+    NarrationEntityMicroOutput,
+    NarrationSlotRewriteOutput,
     NarrationTermEntityBatchOutput,
     NarrationSemanticBatchOutput,
     ScenePlannerOutput,
@@ -20,6 +24,13 @@ from .models import (
     SemanticCriticBatchOutput,
     TranslationPromptTemplate,
 )
+
+_MODEL_PRICE_PER_1M_TOKENS_USD: dict[str, tuple[float, float]] = {
+    "gpt-4.1-mini": (0.40, 1.60),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-5.4-mini": (0.40, 1.60),
+    "gpt-5.4": (2.00, 8.00),
+}
 
 
 def _chunk_rows(rows: list[Row], batch_size: int) -> list[list[Row]]:
@@ -157,6 +168,20 @@ class OpenAITranslationEngine:
         if not parsed:
             raise RuntimeError("Model khong tra ve du lieu co parse duoc")
         return parsed
+
+    @staticmethod
+    def estimate_metric_cost_usd(metric: LLMCallMetric, *, model: str) -> float:
+        input_price, output_price = _MODEL_PRICE_PER_1M_TOKENS_USD.get(
+            model,
+            _MODEL_PRICE_PER_1M_TOKENS_USD["gpt-4.1-mini"],
+        )
+        input_tokens = max(0, int(metric.input_token_count or 0))
+        output_tokens = max(0, int(metric.output_token_count or 0))
+        return round(((input_tokens * input_price) + (output_tokens * output_price)) / 1_000_000.0, 6)
+
+    @classmethod
+    def estimate_total_cost_usd(cls, metrics: list[LLMCallMetric], *, model: str) -> float:
+        return round(sum(cls.estimate_metric_cost_usd(metric, model=model) for metric in metrics), 6)
 
     def translate_segments(
         self,
@@ -393,6 +418,144 @@ class OpenAITranslationEngine:
             scene_id=str(batch_payload.get("scene", {}).get("scene_id") or ""),
             batch_index=batch_payload.get("scene", {}).get("batch_index"),
             batch_count=batch_payload.get("scene", {}).get("batch_count"),
+        )
+
+    def analyze_narration_canonical_span(
+        self,
+        context: JobContext,
+        *,
+        template: TranslationPromptTemplate,
+        span_payload: dict[str, object],
+        source_language: str,
+        target_language: str,
+        context_payload: dict[str, object],
+        glossary_payload: dict[str, object],
+        model: str | None = None,
+        prompt_cache_key: str | None = None,
+        record_call: Callable[[LLMCallMetric], None] | None = None,
+        route_mode: str = "narration_fast_v2",
+    ) -> NarrationCanonicalSpanOutput:
+        return self.analyze_semantics(
+            context,
+            template=template,
+            batch_payload=span_payload,
+            source_language=source_language,
+            target_language=target_language,
+            context_payload=context_payload,
+            glossary_payload=glossary_payload,
+            model=model,
+            output_model=NarrationCanonicalSpanOutput,
+            prompt_cache_key=prompt_cache_key,
+            record_call=record_call,
+            route_mode=route_mode,
+        )
+
+    def resolve_narration_entities(
+        self,
+        context: JobContext,
+        *,
+        template: TranslationPromptTemplate,
+        span_payload: dict[str, object],
+        source_language: str,
+        target_language: str,
+        context_payload: dict[str, object],
+        glossary_payload: dict[str, object],
+        model: str | None = None,
+        prompt_cache_key: str | None = None,
+        record_call: Callable[[LLMCallMetric], None] | None = None,
+        route_mode: str = "narration_fast_v2",
+    ) -> NarrationEntityMicroOutput:
+        client = self._build_client()
+        selected_model = model or self._settings.default_translation_model
+        user_prompt = self._build_structured_user_prompt(
+            template=template,
+            source_payload=json.dumps(span_payload, ensure_ascii=False, indent=2),
+            source_language=source_language,
+            target_language=target_language,
+            glossary_payload=json.dumps(glossary_payload, ensure_ascii=False, indent=2),
+            constraints_payload=json.dumps(template.default_constraints_json, ensure_ascii=False, indent=2),
+            context_payload=json.dumps(context_payload, ensure_ascii=False, indent=2),
+        )
+        context.report_progress(52, "Dang resolve entity/term micro-pass")
+        return self._call_structured_output(
+            client=client,
+            model=selected_model,
+            template=template,
+            user_prompt=user_prompt,
+            output_model=NarrationEntityMicroOutput,
+            prompt_cache_key=prompt_cache_key,
+            record_call=record_call,
+            route_mode=route_mode,
+            scene_id=str(span_payload.get("span", {}).get("span_id") or span_payload.get("span_id") or ""),
+        )
+
+    def resolve_narration_ambiguity(
+        self,
+        context: JobContext,
+        *,
+        template: TranslationPromptTemplate,
+        span_payload: dict[str, object],
+        source_language: str,
+        target_language: str,
+        context_payload: dict[str, object],
+        glossary_payload: dict[str, object],
+        model: str | None = None,
+        prompt_cache_key: str | None = None,
+        record_call: Callable[[LLMCallMetric], None] | None = None,
+        route_mode: str = "narration_fast_v2",
+    ) -> NarrationAmbiguityMicroOutput:
+        client = self._build_client()
+        selected_model = model or self._settings.default_translation_model
+        user_prompt = self._build_structured_user_prompt(
+            template=template,
+            source_payload=json.dumps(span_payload, ensure_ascii=False, indent=2),
+            source_language=source_language,
+            target_language=target_language,
+            glossary_payload=json.dumps(glossary_payload, ensure_ascii=False, indent=2),
+            constraints_payload=json.dumps(template.default_constraints_json, ensure_ascii=False, indent=2),
+            context_payload=json.dumps(context_payload, ensure_ascii=False, indent=2),
+        )
+        context.report_progress(58, "Dang resolve ambiguity micro-pass")
+        return self._call_structured_output(
+            client=client,
+            model=selected_model,
+            template=template,
+            user_prompt=user_prompt,
+            output_model=NarrationAmbiguityMicroOutput,
+            prompt_cache_key=prompt_cache_key,
+            record_call=record_call,
+            route_mode=route_mode,
+            scene_id=str(span_payload.get("span", {}).get("span_id") or span_payload.get("span_id") or ""),
+        )
+
+    def rewrite_narration_slot(
+        self,
+        context: JobContext,
+        *,
+        template: TranslationPromptTemplate,
+        span_payload: dict[str, object],
+        source_language: str,
+        target_language: str,
+        context_payload: dict[str, object],
+        glossary_payload: dict[str, object],
+        model: str | None = None,
+        prompt_cache_key: str | None = None,
+        record_call: Callable[[LLMCallMetric], None] | None = None,
+        route_mode: str = "narration_fast_v2",
+    ) -> NarrationSlotRewriteOutput:
+        return self.adapt_dialogue(
+            context,
+            template=template,
+            batch_payload=span_payload,
+            source_language=source_language,
+            target_language=target_language,
+            context_payload=context_payload,
+            glossary_payload=glossary_payload,
+            model=model,
+            output_model=NarrationSlotRewriteOutput,
+            prompt_cache_key=prompt_cache_key,
+            record_call=record_call,
+            route_mode=route_mode,
         )
 
     def critique_dialogue(

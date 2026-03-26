@@ -107,8 +107,19 @@ class DependencyPaths(BaseModel):
     mpv_dll_path: str | None = None
 
 
+VALID_UI_MODES = {"simple_v2", "advanced"}
+
+
+def normalize_ui_mode(value: object) -> str:
+    raw_value = str(value or "simple_v2").strip().lower()
+    if raw_value not in VALID_UI_MODES:
+        return "simple_v2"
+    return raw_value
+
+
 class AppSettings(BaseModel):
     ui_language: str = "vi"
+    ui_mode: str = "simple_v2"
     dependency_paths: DependencyPaths = Field(default_factory=DependencyPaths)
     model_cache_dir: str | None = None
     openai_api_key_encrypted: str | None = None
@@ -122,6 +133,7 @@ class AppSettings(BaseModel):
     @model_validator(mode="after")
     def _hydrate_private_fields(self) -> AppSettings:
         self._openai_api_key = None
+        self.ui_mode = normalize_ui_mode(self.ui_mode)
         return self
 
     @property

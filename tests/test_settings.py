@@ -22,6 +22,7 @@ def test_settings_roundtrip(tmp_path: Path) -> None:
     loaded = load_settings(settings_path=settings_path, appdata_dir=appdata_dir)
 
     assert loaded.ui_language == "vi"
+    assert loaded.ui_mode == "simple_v2"
     assert loaded.dependency_paths.ffmpeg_path == "C:/ffmpeg/bin/ffmpeg.exe"
     assert loaded.model_cache_dir == str(tmp_path / "models")
     assert loaded.openai_api_key == "sk-test-secret"
@@ -37,6 +38,7 @@ def test_load_settings_creates_defaults_when_missing(tmp_path: Path) -> None:
 
     assert settings_path.exists()
     assert loaded.ui_language == "vi"
+    assert loaded.ui_mode == "simple_v2"
     assert loaded.model_cache_dir is not None
 
 
@@ -65,5 +67,6 @@ def test_load_settings_migrates_legacy_plaintext_openai_key(tmp_path: Path) -> N
     migrated_payload = json.loads(settings_path.read_text(encoding="utf-8"))
 
     assert loaded.openai_api_key == "sk-legacy-secret"
+    assert loaded.ui_mode == "simple_v2"
     assert migrated_payload["openai_api_key_encrypted"]
     assert "openai_api_key" not in migrated_payload

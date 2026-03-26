@@ -2,11 +2,12 @@
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QItemSelectionModel, QSignalBlocker, QTimer, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QItemSelectionModel, QSignalBlocker, QTimer, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QAbstractItemView,
@@ -41,8 +42,8 @@ from app.audio.mixdown import build_mixdown_stage_hash, mix_audio_tracks
 from app.audio.voiceover_track import build_voice_track, build_voice_track_stage_hash
 from app.core.ffmpeg import detect_ffmpeg_installation
 from app.core.jobs import JobContext, JobManager, JobResult, JobStatus
-from app.core.paths import get_appdata_dir
-from app.core.settings import AppSettings, save_settings
+from app.core.paths import get_appdata_dir, get_default_workspace_dir, get_user_downloads_dir
+from app.core.settings import AppSettings, normalize_ui_mode, save_settings
 from app.exporting.models import WatermarkProfile
 from app.exporting.presets import (
     list_export_presets,
@@ -60,6 +61,12 @@ from app.project.database import (
     CANONICAL_SUBTITLE_TRACK_KIND,
     ProjectDatabase,
     USER_SUBTITLE_TRACK_KIND,
+)
+from app.project.profiles import (
+    default_project_profiles,
+    load_project_profile_state,
+    resolve_subtitle_subtext_mode,
+    set_project_subtitle_subtext_mode,
 )
 from app.project.models import (
     ProjectInitRequest,
@@ -142,6 +149,13 @@ REGISTER_STYLE_VOLUME_COLUMN = 8
 REGISTER_STYLE_PITCH_COLUMN = 9
 REGISTER_STYLE_STATUS_COLUMN = 10
 
+UI_MODE_SIMPLE_V2 = "simple_v2"
+UI_MODE_ADVANCED = "advanced"
+UI_MODE_LABELS = {
+    UI_MODE_SIMPLE_V2: "Đơn giản (V2)",
+    UI_MODE_ADVANCED: "Nâng cao",
+}
+
 
 class MainWindow(QMainWindow):
     def __init__(self, settings: AppSettings, job_manager: JobManager) -> None:
@@ -158,6 +172,7 @@ class MainWindow(QMainWindow):
         self._subtitle_editor_loading = False
         self._subtitle_editor_dirty = False
         self._subtitle_segment_snapshot: dict[str, dict[str, object]] = {}
+        self._subtitle_subtext_toggle: QCheckBox | None = None
         self._subtitle_qc_report = SubtitleQcReport(total_segments=0, issues=[])
         self._preview_controller = MpvPreviewController()
         self._preview_reload_timer = QTimer(self)
@@ -184,6 +199,14 @@ class MainWindow(QMainWindow):
         self._last_doctor_report = None
         self._last_cache_inventory = None
         self._last_repair_report = None
+        self._available_project_profiles = []
+        self._ui_mode_combo: QComboBox | None = None
+        self._settings_ui_mode_combo: QComboBox | None = None
+        self._project_profile_combo: QComboBox | None = None
+        self._project_root_browse_button: QPushButton | None = None
+        self._project_name_user_edited = False
+        self._project_root_user_edited = False
+        self._default_project_dir_seed = datetime.now().strftime("video-moi-%Y%m%d-%H%M%S")
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1360, 860)
@@ -216,13 +239,289 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
 
+        self._ui_mode_bar = self._build_ui_mode_bar()
+
         container = QWidget()
         layout = QVBoxLayout(container)
+        layout.addWidget(self._ui_mode_bar)
         layout.addWidget(splitter)
         self.setCentralWidget(container)
 
         self._sync_settings_to_form()
+        self._reload_project_profile_options()
+        self._sync_ui_mode_controls()
+        self._apply_ui_mode()
         self._append_log_line("Khởi tạo giao diện hoàn tất")
+
+    def _build_ui_mode_bar(self) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addStretch(1)
+        layout.addWidget(QLabel("Chế độ giao diện"))
+        self._ui_mode_combo = QComboBox()
+        self._ui_mode_combo.addItem(UI_MODE_LABELS[UI_MODE_SIMPLE_V2], UI_MODE_SIMPLE_V2)
+        self._ui_mode_combo.addItem(UI_MODE_LABELS[UI_MODE_ADVANCED], UI_MODE_ADVANCED)
+        self._ui_mode_combo.currentIndexChanged.connect(self._handle_ui_mode_combo_changed)
+        layout.addWidget(self._ui_mode_combo)
+        return container
+
+    def _current_ui_mode(self) -> str:
+        return normalize_ui_mode(getattr(self._settings, "ui_mode", UI_MODE_SIMPLE_V2))
+
+    def _is_simple_ui_mode(self) -> bool:
+        return self._current_ui_mode() == UI_MODE_SIMPLE_V2
+
+    def _sync_ui_mode_controls(self) -> None:
+        mode = self._current_ui_mode()
+        for combo in (self._ui_mode_combo, self._settings_ui_mode_combo):
+            if combo is None:
+                continue
+            with QSignalBlocker(combo):
+                index = combo.findData(mode)
+                combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _handle_ui_mode_combo_changed(self, index: int) -> None:
+        del index
+        combo = self.sender()
+        if not isinstance(combo, QComboBox):
+            return
+        self._set_ui_mode(str(combo.currentData() or UI_MODE_SIMPLE_V2))
+
+    def _set_ui_mode(self, mode: str, *, persist: bool = True) -> None:
+        normalized_mode = normalize_ui_mode(mode)
+        if getattr(self._settings, "ui_mode", UI_MODE_SIMPLE_V2) == normalized_mode:
+            self._sync_ui_mode_controls()
+            self._apply_ui_mode()
+            return
+        self._settings.ui_mode = normalized_mode
+        self._sync_ui_mode_controls()
+        self._reload_project_profile_options()
+        self._apply_ui_mode()
+        if persist:
+            save_settings(self._settings)
+
+    @staticmethod
+    def _set_form_row_visible(form: QFormLayout, field: QWidget, visible: bool) -> None:
+        label = form.labelForField(field)
+        if label is not None:
+            label.setVisible(visible)
+        field.setVisible(visible)
+
+    def _set_tab_visible(self, title: str, visible: bool) -> None:
+        for index in range(self._tabs.count()):
+            if self._tabs.tabText(index) == title:
+                self._tabs.setTabVisible(index, visible)
+                break
+
+    def _apply_ui_mode(self) -> None:
+        simple_mode = self._is_simple_ui_mode()
+        self._set_tab_visible("Nhật ký", not simple_mode)
+
+        self._project_smoke_button.setVisible(not simple_mode)
+        self._project_ops_group.setVisible(not simple_mode)
+        self._prepare_media_button.setText("1. Chuẩn bị video" if simple_mode else "Chuẩn bị media")
+        self._asr_translate_button.setText("2. Tạo phụ đề" if simple_mode else "ASR -> Dịch")
+        self._project_review_button.setVisible(simple_mode)
+        self._project_finish_button.setVisible(simple_mode)
+        self._dub_button.setVisible(not simple_mode)
+        self._full_pipeline_button.setVisible(not simple_mode)
+        self._stop_workflow_button.setText("Dừng" if simple_mode else "Dừng quy trình")
+
+        self._set_form_row_visible(self._translate_form, self._asr_engine_combo, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._asr_model_combo, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._asr_language_combo, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._vad_checkbox, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._word_timestamps_checkbox, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._translation_mode_info, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._prompt_combo, not simple_mode)
+        self._set_form_row_visible(self._translate_form, self._translation_model_input, not simple_mode)
+        self._reload_prompts_button.setVisible(not simple_mode)
+
+        self._subtitle_tools_container.setVisible(not simple_mode)
+        for widget in (
+            self._translated_to_subtitle_button,
+            self._subtitle_to_tts_button,
+            self._polish_tts_button,
+            self._split_subtitle_button,
+            self._merge_subtitle_button,
+        ):
+            widget.setVisible(not simple_mode)
+
+        for field in (
+            self._voice_profile_name_input,
+            self._voice_engine_combo,
+            self._voice_id_input,
+            self._voice_language_input,
+            self._voice_profile_numeric_container,
+            self._voice_info,
+            self._voice_preset_notes,
+            self._voice_profile_status,
+            self._voice_notes_input,
+            self._voice_clone_status,
+            self._voice_ref_audio_container,
+            self._vieneu_ref_text_input,
+            self._voice_profile_actions_container,
+            self._speaker_binding_status,
+            self._speaker_binding_hint,
+            self._speaker_binding_table,
+            self._speaker_binding_actions_container,
+            self._voice_policy_status,
+            self._voice_policy_hint,
+            self._character_voice_policy_table,
+            self._relationship_voice_policy_table,
+            self._register_voice_style_status,
+            self._register_voice_style_hint,
+            self._register_voice_style_table,
+            self._voice_policy_actions_container,
+            self._effective_voice_plan_preview,
+        ):
+            self._set_form_row_visible(self._voiceover_form, field, not simple_mode)
+
+        self._rerun_downstream_only_button.setVisible(not simple_mode)
+
+        for field in (
+            self._watermark_profile_combo,
+            self._watermark_profile_name_input,
+            self._watermark_profile_status,
+            self._watermark_enabled_checkbox,
+            self._watermark_path_container,
+            self._watermark_position_combo,
+            self._watermark_numeric_container,
+            self._watermark_actions_container,
+        ):
+            self._set_form_row_visible(self._export_form, field, not simple_mode)
+        self._reload_export_presets_button.setVisible(not simple_mode)
+        self._sync_ui_mode_controls()
+        self._apply_default_form_values()
+
+    @staticmethod
+    def _normalize_project_name(raw_value: str, *, fallback: str) -> str:
+        normalized = raw_value.replace("_", " ")
+        normalized = re.sub(r"\s+", " ", normalized).strip(" .-_")
+        return normalized or fallback
+
+    @staticmethod
+    def _sanitize_project_dir_name(raw_value: str, *, fallback: str) -> str:
+        normalized = re.sub(r'[<>:"/\\|?*#]+', " ", raw_value.replace("_", " "))
+        normalized = re.sub(r"\s+", "-", normalized).strip(" .-_")
+        if len(normalized) > 80:
+            normalized = normalized[:80].rstrip(" .-_")
+        return normalized or fallback
+
+    def _default_project_display_name(self) -> str:
+        return "Video mới"
+
+    def _default_project_directory_name(self) -> str:
+        return self._default_project_dir_seed
+
+    def _suggest_project_name(self, source_video_path: Path | None = None) -> str:
+        if source_video_path is not None and source_video_path.stem.strip():
+            return self._normalize_project_name(
+                source_video_path.stem,
+                fallback=self._default_project_display_name(),
+            )
+        return self._default_project_display_name()
+
+    def _suggest_project_root(
+        self,
+        *,
+        source_video_path: Path | None = None,
+        project_name: str | None = None,
+    ) -> Path:
+        workspace_root = get_default_workspace_dir()
+        seed = project_name or (source_video_path.stem if source_video_path is not None else "")
+        folder_name = self._sanitize_project_dir_name(
+            seed,
+            fallback=self._default_project_directory_name(),
+        )
+        return workspace_root / folder_name
+
+    def _project_root_dialog_start_dir(self) -> Path:
+        raw_value = self._project_root_input.text().strip()
+        if raw_value:
+            candidate = Path(raw_value).expanduser()
+            if candidate.exists():
+                return candidate
+            if candidate.parent.exists():
+                return candidate.parent
+        if self._current_workspace is not None:
+            return self._current_workspace.root_dir
+        return get_default_workspace_dir()
+
+    def _video_dialog_start_dir(self) -> Path:
+        raw_value = self._source_video_input.text().strip()
+        if raw_value:
+            candidate = Path(raw_value).expanduser()
+            if candidate.exists():
+                return candidate.parent if candidate.is_file() else candidate
+        if self._current_workspace and self._current_workspace.source_video_path:
+            return self._current_workspace.source_video_path.parent
+        downloads_dir = get_user_downloads_dir()
+        if downloads_dir.exists():
+            return downloads_dir
+        return get_default_workspace_dir()
+
+    def _apply_default_form_values(self) -> None:
+        if self._current_workspace is None:
+            suggested_root = self._suggest_project_root(project_name=self._project_name_input.text().strip() or None)
+            if not self._project_name_user_edited and not self._project_name_input.text().strip():
+                self._project_name_input.clear()
+            if not self._project_root_user_edited:
+                self._project_root_input.setText(str(suggested_root))
+        if self._is_simple_ui_mode() and self._current_workspace is None:
+            self._set_combo_text_if_present(self._source_lang_combo, "zh")
+            self._set_combo_text_if_present(self._target_lang_combo, "vi")
+            self._set_combo_text_if_present(self._asr_language_combo, "zh")
+            self._original_volume_input.setText("0.07")
+            self._voice_volume_input.setText("1.0")
+            self._bgm_volume_input.setText("0.0")
+
+    @staticmethod
+    def _set_combo_text_if_present(combo: QComboBox, value: str) -> None:
+        index = combo.findText(value)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+
+    def _apply_profile_defaults_to_form(self, profile: object | None) -> None:
+        if profile is None:
+            return
+        source_language = getattr(profile, "source_language", None)
+        if source_language:
+            self._set_combo_text_if_present(self._source_lang_combo, str(source_language))
+            self._set_combo_text_if_present(self._asr_language_combo, str(source_language))
+        target_language = getattr(profile, "target_language", None)
+        if target_language:
+            self._set_combo_text_if_present(self._target_lang_combo, str(target_language))
+        recommended_original_volume = getattr(profile, "recommended_original_volume", None)
+        if recommended_original_volume is not None:
+            self._original_volume_input.setText(f"{float(recommended_original_volume):g}")
+        recommended_voice_volume = getattr(profile, "recommended_voice_volume", None)
+        if recommended_voice_volume is not None:
+            self._voice_volume_input.setText(f"{float(recommended_voice_volume):g}")
+        if getattr(profile, "project_profile_id", "") == "zh-vi-narration-fast-v2-vieneu":
+            self._bgm_volume_input.setText("0.0")
+
+    def _handle_project_name_edited(self, text: str) -> None:
+        self._project_name_user_edited = True
+        if self._project_root_user_edited:
+            return
+        suggested_root = self._suggest_project_root(project_name=text.strip() or None)
+        self._project_root_input.setText(str(suggested_root))
+
+    def _handle_project_root_edited(self, _text: str) -> None:
+        self._project_root_user_edited = True
+
+    def _apply_project_suggestions_from_source(self, source_video_path: Path) -> None:
+        suggested_name = self._suggest_project_name(source_video_path)
+        if not self._project_name_user_edited or not self._project_name_input.text().strip():
+            self._project_name_input.setText(suggested_name)
+        if not self._project_root_user_edited or not self._project_root_input.text().strip():
+            suggested_root = self._suggest_project_root(
+                source_video_path=source_video_path,
+                project_name=self._project_name_input.text().strip() or suggested_name,
+            )
+            self._project_root_input.setText(str(suggested_root))
 
     def _build_project_tab(self) -> QWidget:
         widget = QWidget()
@@ -237,24 +536,32 @@ class MainWindow(QMainWindow):
         self._cache_ops_summary = self._create_info_label("Cache ops: chưa có dữ liệu")
 
         group = QGroupBox("Khởi tạo / mở dự án")
+        self._project_init_group = group
         form = QFormLayout(group)
         self._configure_form_layout(form)
 
-        self._project_name_input = QLineEdit("Dự án mới")
-        self._project_root_input = QLineEdit(str(Path.cwd() / "workspace"))
+        self._project_name_input = QLineEdit()
+        self._project_name_input.setPlaceholderText("Tự lấy từ tên video")
+        self._project_name_input.textEdited.connect(self._handle_project_name_edited)
+        self._project_root_input = QLineEdit(str(self._suggest_project_root()))
+        self._project_root_input.textEdited.connect(self._handle_project_root_edited)
         self._source_video_input = QLineEdit()
         self._source_lang_combo = QComboBox()
         self._source_lang_combo.addItems(["auto", "vi", "zh", "en"])
         self._target_lang_combo = QComboBox()
         self._target_lang_combo.addItems(["vi", "zh", "en"])
+        self._project_profile_combo = QComboBox()
+        self._project_profile_combo.currentIndexChanged.connect(self._handle_project_profile_changed)
 
-        browse_button = QPushButton("Chọn thư mục")
+        browse_button = QPushButton("Chọn")
+        self._project_root_browse_button = browse_button
         browse_button.clicked.connect(self._choose_project_root)
         create_button = QPushButton("Tạo dự án")
         create_button.clicked.connect(self._create_project)
         open_button = QPushButton("Mở dự án")
         open_button.clicked.connect(self._open_project)
         smoke_button = QPushButton("Chạy tác vụ thử")
+        self._project_smoke_button = smoke_button
         smoke_button.clicked.connect(self._run_smoke_job)
         choose_video_button = QPushButton("Chọn video")
         choose_video_button.clicked.connect(self._choose_source_video)
@@ -263,6 +570,7 @@ class MainWindow(QMainWindow):
         extract_button = QPushButton("Tách âm thanh")
         extract_button.clicked.connect(self._run_extract_audio_job)
         prepare_media_button = QPushButton("Chuẩn bị media")
+        self._prepare_media_button = prepare_media_button
         prepare_media_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["probe_media", "extract_audio"],
@@ -270,20 +578,33 @@ class MainWindow(QMainWindow):
             )
         )
         asr_translate_button = QPushButton("ASR -> Dịch")
+        self._asr_translate_button = asr_translate_button
         asr_translate_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["asr", "translate"],
                 workflow_name="ASR -> Dịch",
             )
         )
+        review_button = QPushButton("3. Mở review")
+        self._project_review_button = review_button
+        review_button.clicked.connect(self._open_review_queue_tab)
         dub_button = QPushButton("Lồng tiếng nhanh")
+        self._dub_button = dub_button
         dub_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["tts", "voice_track", "mixdown"],
                 workflow_name="Lồng tiếng nhanh",
             )
         )
+        finish_button = QPushButton("4. Hoàn thiện video")
+        self._project_finish_button = finish_button
+        finish_button.clicked.connect(self._start_simple_finish_workflow)
+        open_export_button = QPushButton("Mở video xuất")
+        self._open_export_video_button = open_export_button
+        open_export_button.setEnabled(False)
+        open_export_button.clicked.connect(self._open_last_export_video)
         full_pipeline_button = QPushButton("Chạy toàn bộ quy trình")
+        self._full_pipeline_button = full_pipeline_button
         full_pipeline_button.clicked.connect(
             lambda checked=False: self._start_workflow(
                 ["probe_media", "extract_audio", "asr", "translate", "tts", "voice_track", "mixdown", "export_video"],
@@ -291,10 +612,17 @@ class MainWindow(QMainWindow):
             )
         )
         stop_workflow_button = QPushButton("Dừng quy trình")
+        self._stop_workflow_button = stop_workflow_button
         stop_workflow_button.clicked.connect(self._stop_workflow)
 
+        project_root_row = QHBoxLayout()
+        project_root_row.setContentsMargins(0, 0, 0, 0)
+        project_root_row.addWidget(self._project_root_input)
+        project_root_row.addWidget(browse_button)
+        project_root_container = QWidget()
+        project_root_container.setLayout(project_root_row)
+
         button_row = QHBoxLayout()
-        button_row.addWidget(browse_button)
         button_row.addWidget(create_button)
         button_row.addWidget(open_button)
         button_row.addWidget(smoke_button)
@@ -313,9 +641,12 @@ class MainWindow(QMainWindow):
         workflow_row_top = QHBoxLayout()
         workflow_row_top.addWidget(prepare_media_button)
         workflow_row_top.addWidget(asr_translate_button)
+        workflow_row_top.addWidget(review_button)
         workflow_row_top.addWidget(dub_button)
         workflow_row_top.addStretch(1)
         workflow_row_bottom = QHBoxLayout()
+        workflow_row_bottom.addWidget(finish_button)
+        workflow_row_bottom.addWidget(open_export_button)
         workflow_row_bottom.addWidget(full_pipeline_button)
         workflow_row_bottom.addWidget(stop_workflow_button)
         workflow_row_bottom.addStretch(1)
@@ -326,12 +657,14 @@ class MainWindow(QMainWindow):
         workflow_container.setLayout(workflow_row)
 
         workflow_group = QGroupBox("Quy trình nhanh")
+        self._project_workflow_group = workflow_group
         workflow_form = QFormLayout(workflow_group)
         self._configure_form_layout(workflow_form)
         workflow_form.addRow("Trạng thái", self._workflow_status)
         workflow_form.addRow("", workflow_container)
 
         ops_group = QGroupBox("Ops & Safety")
+        self._project_ops_group = ops_group
         ops_form = QFormLayout(ops_group)
         self._configure_form_layout(ops_form)
         self._cache_bucket_combo = QComboBox()
@@ -381,11 +714,12 @@ class MainWindow(QMainWindow):
         ops_form.addRow("", ops_buttons_container)
 
         form.addRow("Tên dự án", self._project_name_input)
-        form.addRow("Thư mục dự án", self._project_root_input)
+        form.addRow("Thư mục dự án", project_root_container)
         form.addRow("Video nguồn", self._source_video_input)
         form.addRow("", source_container)
         form.addRow("Ngôn ngữ nguồn", self._source_lang_combo)
         form.addRow("Dịch sang", self._target_lang_combo)
+        form.addRow("Hồ sơ dự án", self._project_profile_combo)
         form.addRow("", button_container)
 
         layout.addWidget(self._project_summary)
@@ -406,12 +740,64 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         return widget
 
+    def _reload_project_profile_options(self, selected_profile_id: str | None = None) -> None:
+        if self._project_profile_combo is None:
+            return
+        profiles = default_project_profiles()
+        if self._is_simple_ui_mode():
+            profiles = [
+                profile
+                for profile in profiles
+                if profile.project_profile_id == "zh-vi-narration-fast-v2-vieneu"
+            ]
+        self._available_project_profiles = profiles
+        with QSignalBlocker(self._project_profile_combo):
+            self._project_profile_combo.clear()
+            if not self._is_simple_ui_mode():
+                self._project_profile_combo.addItem("Chọn sau / thủ công", "")
+            for profile in profiles:
+                self._project_profile_combo.addItem(
+                    f"{profile.name} ({profile.project_profile_id})",
+                    profile.project_profile_id,
+                )
+            desired_profile_id = selected_profile_id
+            if desired_profile_id is None and self._is_simple_ui_mode():
+                desired_profile_id = "zh-vi-narration-fast-v2-vieneu"
+            index = self._project_profile_combo.findData(desired_profile_id or "")
+            self._project_profile_combo.setCurrentIndex(index if index >= 0 else 0)
+        self._handle_project_profile_changed(self._project_profile_combo.currentIndex())
+
+    def _selected_project_profile_id(self) -> str | None:
+        if self._project_profile_combo is None:
+            return None
+        value = str(self._project_profile_combo.currentData() or "").strip()
+        return value or None
+
+    def _handle_project_profile_changed(self, index: int) -> None:
+        del index
+        profile_id = self._selected_project_profile_id()
+        if not profile_id:
+            return
+        profile = next(
+            (
+                item
+                for item in self._available_project_profiles
+                if item.project_profile_id == profile_id
+            ),
+            None,
+        )
+        if profile is None:
+            return
+        self._apply_profile_defaults_to_form(profile)
+
     def _build_translate_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
         group = QGroupBox("ASR và Dịch")
+        self._translate_group = group
         form = QFormLayout(group)
+        self._translate_form = form
         self._configure_form_layout(form)
 
         self._asr_summary = self._create_info_label("Chưa có kết quả ASR")
@@ -434,10 +820,13 @@ class MainWindow(QMainWindow):
         self._review_summary = self._create_info_label("Chưa có hàng review semantic")
 
         run_asr_button = QPushButton("Chạy ASR")
+        self._run_asr_button = run_asr_button
         run_asr_button.clicked.connect(self._run_asr_job)
         reload_prompts_button = QPushButton("Nạp lại prompt")
+        self._reload_prompts_button = reload_prompts_button
         reload_prompts_button.clicked.connect(self._reload_prompt_templates)
         run_translate_button = QPushButton("Chạy dịch")
+        self._run_translate_button = run_translate_button
         run_translate_button.clicked.connect(self._run_translation_job)
         translate_buttons = QHBoxLayout()
         translate_buttons.addWidget(reload_prompts_button)
@@ -590,14 +979,19 @@ class MainWindow(QMainWindow):
         reload_button = QPushButton("Nạp lại từ CSDL")
         reload_button.clicked.connect(lambda: self._reload_subtitle_editor_from_db(force=True))
         translated_to_subtitle_button = QPushButton("Bản dịch -> Phụ đề")
+        self._translated_to_subtitle_button = translated_to_subtitle_button
         translated_to_subtitle_button.clicked.connect(self._apply_translated_to_subtitle)
         subtitle_to_tts_button = QPushButton("Phụ đề -> Lời TTS")
+        self._subtitle_to_tts_button = subtitle_to_tts_button
         subtitle_to_tts_button.clicked.connect(self._apply_subtitle_to_tts)
         polish_tts_button = QPushButton("Làm mượt Lời TTS")
+        self._polish_tts_button = polish_tts_button
         polish_tts_button.clicked.connect(self._polish_tts_texts)
         split_button = QPushButton("Tách dòng chọn")
+        self._split_subtitle_button = split_button
         split_button.clicked.connect(self._split_selected_subtitle_row)
         merge_button = QPushButton("Gộp với dòng sau")
+        self._merge_subtitle_button = merge_button
         merge_button.clicked.connect(self._merge_selected_subtitle_row_with_next)
         save_button = QPushButton("Lưu chỉnh sửa")
         save_button.clicked.connect(self._save_subtitle_edits)
@@ -611,6 +1005,9 @@ class MainWindow(QMainWindow):
         preview_from_start_button.clicked.connect(lambda: self._preview_subtitles(start_from_selected=False))
         preview_selected_button = QPushButton("Xem dòng chọn")
         preview_selected_button.clicked.connect(lambda: self._preview_subtitles(start_from_selected=True))
+        self._subtitle_subtext_toggle = QCheckBox("Subtext gốc")
+        self._subtitle_subtext_toggle.setChecked(False)
+        self._subtitle_subtext_toggle.toggled.connect(self._handle_subtitle_subtext_toggle)
         export_srt_button = QPushButton("Xuất SRT")
         export_srt_button.clicked.connect(lambda: self._run_export_subtitles_job("srt"))
         export_ass_button = QPushButton("Xuất ASS")
@@ -629,6 +1026,7 @@ class MainWindow(QMainWindow):
         action_row_bottom = QHBoxLayout()
         action_row_bottom.addWidget(preview_from_start_button)
         action_row_bottom.addWidget(preview_selected_button)
+        action_row_bottom.addWidget(self._subtitle_subtext_toggle)
         action_row_bottom.addWidget(export_srt_button)
         action_row_bottom.addWidget(export_ass_button)
         action_row_bottom.addStretch(1)
@@ -656,6 +1054,7 @@ class MainWindow(QMainWindow):
         tools_row.addLayout(replace_row)
         tools_container = QWidget()
         tools_container.setLayout(tools_row)
+        self._subtitle_tools_container = tools_container
 
         layout.addWidget(self._subtitle_summary)
         layout.addWidget(self._subtitle_editor_status)
@@ -903,7 +1302,9 @@ class MainWindow(QMainWindow):
         mix_button.clicked.connect(self._run_mixdown_job)
 
         group = QGroupBox("Preset giọng, TTS và trộn âm thanh")
+        self._voiceover_group = group
         form = QFormLayout(group)
+        self._voiceover_form = form
         self._configure_form_layout(form)
         action_row = QHBoxLayout()
         action_row.addWidget(reload_voices_button)
@@ -912,6 +1313,7 @@ class MainWindow(QMainWindow):
         action_row.addStretch(1)
         action_container = QWidget()
         action_container.setLayout(action_row)
+        self._voice_actions_container = action_container
 
         profile_action_row_top = QHBoxLayout()
         profile_action_row_top.addWidget(self._save_voice_preset_button)
@@ -926,6 +1328,7 @@ class MainWindow(QMainWindow):
         profile_action_row.addLayout(profile_action_row_bottom)
         profile_action_container = QWidget()
         profile_action_container.setLayout(profile_action_row)
+        self._voice_profile_actions_container = profile_action_container
 
         speaker_binding_actions_top = QHBoxLayout()
         speaker_binding_actions_top.addWidget(self._reload_speaker_bindings_button)
@@ -942,6 +1345,7 @@ class MainWindow(QMainWindow):
         speaker_binding_actions.addLayout(speaker_binding_actions_bottom)
         speaker_binding_actions_container = QWidget()
         speaker_binding_actions_container.setLayout(speaker_binding_actions)
+        self._speaker_binding_actions_container = speaker_binding_actions_container
         voice_policy_actions_top = QHBoxLayout()
         voice_policy_actions_top.addWidget(self._reload_voice_policies_button)
         voice_policy_actions_top.addWidget(self._save_voice_policies_button)
@@ -969,18 +1373,21 @@ class MainWindow(QMainWindow):
         voice_policy_actions.addLayout(register_style_actions)
         voice_policy_actions_container = QWidget()
         voice_policy_actions_container.setLayout(voice_policy_actions)
+        self._voice_policy_actions_container = voice_policy_actions_container
 
         ref_audio_row = QHBoxLayout()
         ref_audio_row.addWidget(self._vieneu_ref_audio_input)
         ref_audio_row.addWidget(self._choose_vieneu_ref_audio_button)
         ref_audio_container = QWidget()
         ref_audio_container.setLayout(ref_audio_row)
+        self._voice_ref_audio_container = ref_audio_container
 
         bgm_row = QHBoxLayout()
         bgm_row.addWidget(self._bgm_path_input)
         bgm_row.addWidget(choose_bgm_button)
         bgm_container = QWidget()
         bgm_container.setLayout(bgm_row)
+        self._bgm_container = bgm_container
 
         profile_numeric_row_top = QHBoxLayout()
         profile_numeric_row_top.addWidget(QLabel("Tần số mẫu"))
@@ -999,6 +1406,7 @@ class MainWindow(QMainWindow):
         profile_numeric_row.addLayout(profile_numeric_row_bottom)
         profile_numeric_container = QWidget()
         profile_numeric_container.setLayout(profile_numeric_row)
+        self._voice_profile_numeric_container = profile_numeric_container
 
         mix_row = QHBoxLayout()
         mix_row.addWidget(QLabel("Audio gốc"))
@@ -1011,6 +1419,7 @@ class MainWindow(QMainWindow):
         mix_row.addStretch(1)
         mix_container = QWidget()
         mix_container.setLayout(mix_row)
+        self._mix_container = mix_container
 
         form.addRow("Preset giọng", self._voice_combo)
         form.addRow("Tên preset", self._voice_profile_name_input)
@@ -1094,6 +1503,7 @@ class MainWindow(QMainWindow):
         choose_watermark_button = QPushButton("Chọn logo")
         choose_watermark_button.clicked.connect(self._choose_watermark_file)
         reload_presets_button = QPushButton("Nạp lại preset")
+        self._reload_export_presets_button = reload_presets_button
         reload_presets_button.clicked.connect(self._reload_export_presets)
         reload_watermarks_button = QPushButton("Nạp lại profile watermark")
         reload_watermarks_button.clicked.connect(self._reload_watermark_profiles)
@@ -1106,13 +1516,16 @@ class MainWindow(QMainWindow):
         export_button = QPushButton("Xuất video")
         export_button.clicked.connect(self._run_video_export_job)
         form_group = QGroupBox("Preset xuất video")
+        self._export_group = form_group
         form = QFormLayout(form_group)
+        self._export_form = form
         self._configure_form_layout(form)
         watermark_row = QHBoxLayout()
         watermark_row.addWidget(self._watermark_path_input)
         watermark_row.addWidget(choose_watermark_button)
         watermark_container = QWidget()
         watermark_container.setLayout(watermark_row)
+        self._watermark_path_container = watermark_container
         watermark_actions = QHBoxLayout()
         watermark_actions.addWidget(reload_watermarks_button)
         watermark_actions.addWidget(save_watermark_button)
@@ -1120,6 +1533,7 @@ class MainWindow(QMainWindow):
         watermark_actions.addStretch(1)
         watermark_actions_container = QWidget()
         watermark_actions_container.setLayout(watermark_actions)
+        self._watermark_actions_container = watermark_actions_container
         watermark_numeric_row = QHBoxLayout()
         watermark_numeric_row.addWidget(QLabel("Độ mờ"))
         watermark_numeric_row.addWidget(self._watermark_opacity_input)
@@ -1130,6 +1544,7 @@ class MainWindow(QMainWindow):
         watermark_numeric_row.addStretch(1)
         watermark_numeric_container = QWidget()
         watermark_numeric_container.setLayout(watermark_numeric_row)
+        self._watermark_numeric_container = watermark_numeric_container
         buttons = QHBoxLayout()
         buttons.addWidget(reload_presets_button)
         buttons.addWidget(export_button)
@@ -1168,6 +1583,10 @@ class MainWindow(QMainWindow):
         self._configure_form_layout(form)
 
         self._ui_language_input = QLineEdit()
+        self._settings_ui_mode_combo = QComboBox()
+        self._settings_ui_mode_combo.addItem(UI_MODE_LABELS[UI_MODE_SIMPLE_V2], UI_MODE_SIMPLE_V2)
+        self._settings_ui_mode_combo.addItem(UI_MODE_LABELS[UI_MODE_ADVANCED], UI_MODE_ADVANCED)
+        self._settings_ui_mode_combo.currentIndexChanged.connect(self._handle_ui_mode_combo_changed)
         self._ffmpeg_path_input = QLineEdit()
         self._ffprobe_path_input = QLineEdit()
         self._mpv_path_input = QLineEdit()
@@ -1194,6 +1613,7 @@ class MainWindow(QMainWindow):
         button_container.setLayout(buttons)
 
         form.addRow("Ngôn ngữ giao diện", self._ui_language_input)
+        form.addRow("Chế độ giao diện", self._settings_ui_mode_combo)
         form.addRow("Đường dẫn ffmpeg", self._ffmpeg_path_input)
         form.addRow("Đường dẫn ffprobe", self._ffprobe_path_input)
         form.addRow("Đường dẫn mpv DLL", self._mpv_path_input)
@@ -1393,19 +1813,25 @@ class MainWindow(QMainWindow):
         self._schedule_preview_reload()
 
     def _choose_project_root(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Chọn thư mục dự án")
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Chọn thư mục dự án",
+            str(self._project_root_dialog_start_dir()),
+        )
         if directory:
             self._project_root_input.setText(directory)
+            self._project_root_user_edited = True
 
     def _choose_source_video(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn video nguồn",
-            str(Path.cwd()),
+            str(self._video_dialog_start_dir()),
             "Tệp video (*.mp4 *.mkv *.mov *.avi *.webm);;Tất cả tệp (*.*)",
         )
         if file_path:
             self._source_video_input.setText(file_path)
+            self._apply_project_suggestions_from_source(Path(file_path))
 
     def _resolve_source_video_path(self) -> Path | None:
         raw_value = self._source_video_input.text().strip()
@@ -1787,6 +2213,42 @@ class MainWindow(QMainWindow):
             return
         self._preview_reload_timer.start()
 
+    def _current_subtitle_subtext_mode(self) -> str:
+        if not self._current_workspace:
+            return "off"
+        return resolve_subtitle_subtext_mode(self._current_workspace.root_dir)
+
+    def _sync_subtitle_subtext_toggle(self) -> None:
+        if self._subtitle_subtext_toggle is None:
+            return
+        with QSignalBlocker(self._subtitle_subtext_toggle):
+            self._subtitle_subtext_toggle.setChecked(
+                self._current_workspace is not None
+                and self._current_subtitle_subtext_mode() == "source_text"
+            )
+
+    def _handle_subtitle_subtext_toggle(self, checked: bool) -> None:
+        if self._subtitle_subtext_toggle is None:
+            return
+        if not self._current_workspace:
+            with QSignalBlocker(self._subtitle_subtext_toggle):
+                self._subtitle_subtext_toggle.setChecked(False)
+            return
+        mode = "source_text" if checked else "off"
+        state = set_project_subtitle_subtext_mode(
+            self._current_workspace.root_dir,
+            mode,
+            applied_at=utc_now_iso(),
+        )
+        self._last_subtitle_outputs = {}
+        self._last_export_output = None
+        self._subtitle_summary.setText(
+            "Subtext gốc: bật"
+            if state.subtitle_subtext_mode == "source_text"
+            else "Subtext gốc: tắt"
+        )
+        self._schedule_preview_reload()
+
     def _export_live_preview_ass_from_editor(self) -> Path:
         if not self._current_workspace:
             raise ValueError("Chưa có dự án")
@@ -1795,6 +2257,7 @@ class MainWindow(QMainWindow):
             self._current_workspace,
             segments=rows,
             format_name="ass",
+            subtitle_subtext_mode=self._current_subtitle_subtext_mode(),
         )
         self._live_preview_ass_path = ass_path
         self._last_subtitle_outputs["ass"] = ass_path
@@ -1845,14 +2308,22 @@ class MainWindow(QMainWindow):
         return forked_track, True
 
     def _create_project(self) -> None:
-        root_dir = Path(self._project_root_input.text()).expanduser()
         source_video_path = self._resolve_source_video_path()
+        project_profile_id = self._selected_project_profile_id()
+        if project_profile_id is None and self._is_simple_ui_mode():
+            project_profile_id = "zh-vi-narration-fast-v2-vieneu"
+        project_name = self._project_name_input.text().strip() or self._suggest_project_name(source_video_path)
+        root_dir = Path(
+            self._project_root_input.text().strip()
+            or str(self._suggest_project_root(source_video_path=source_video_path, project_name=project_name))
+        ).expanduser()
         request = ProjectInitRequest(
-            name=self._project_name_input.text().strip() or "Dự án mới",
+            name=project_name,
             root_dir=root_dir,
             source_language=self._source_lang_combo.currentText(),
             target_language=self._target_lang_combo.currentText(),
             source_video_path=source_video_path,
+            project_profile_id=project_profile_id,
         )
         try:
             workspace = bootstrap_project(request)
@@ -1863,7 +2334,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Thành công", f"Đã tạo dự án tại:\n{workspace.root_dir}")
 
     def _open_project(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Mở thư mục dự án")
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Mở thư mục dự án",
+            str(self._project_root_dialog_start_dir()),
+        )
         if not directory:
             return
         try:
@@ -1886,12 +2361,32 @@ class MainWindow(QMainWindow):
         self._last_tts_manifest = None
         self._last_voice_track_output = None
         self._last_mixed_audio_output = None
+        self._project_name_user_edited = False
+        self._project_root_user_edited = False
+        self._project_name_input.setText(workspace.name)
+        self._project_root_input.setText(str(workspace.root_dir))
         self._restore_workspace_runtime_state(workspace)
         self._source_video_input.setText(str(workspace.source_video_path) if workspace.source_video_path else "")
+        state = load_project_profile_state(workspace.root_dir)
+        self._reload_project_profile_options(state.project_profile_id if state is not None else None)
         self._reload_prompt_templates()
         self._reload_voice_presets()
         self._reload_export_presets()
         self._reload_watermark_profiles()
+        self._apply_ui_mode()
+        if state is not None:
+            self._original_volume_input.setText(
+                f"{float(state.recommended_original_volume):g}"
+                if state.recommended_original_volume is not None
+                else self._original_volume_input.text()
+            )
+            self._voice_volume_input.setText(
+                f"{float(state.recommended_voice_volume):g}"
+                if state.recommended_voice_volume is not None
+                else self._voice_volume_input.text()
+            )
+        if state is not None and state.project_profile_id == "zh-vi-narration-fast-v2-vieneu":
+            self._bgm_volume_input.setText("0.0")
         self._project_summary.setText(
             "Dự án hiện tại:\n"
             f"- Tên: {workspace.name}\n"
@@ -1977,6 +2472,84 @@ class MainWindow(QMainWindow):
         self._append_log_line(f"Khởi động quy trình nhanh: {workflow_name}")
         self._run_next_workflow_stage()
 
+    def _activate_tab(self, title: str) -> None:
+        for index in range(self._tabs.count()):
+            if self._tabs.tabText(index) == title:
+                self._tabs.setCurrentIndex(index)
+                return
+
+    def _pending_review_count(self) -> int:
+        if not self._current_workspace:
+            return 0
+        database = ProjectDatabase(self._current_workspace.database_path)
+        if self._current_translation_mode(database.get_project()) != "contextual_v2":
+            return 0
+        return database.count_pending_segment_reviews(self._current_workspace.project_id)
+
+    def _open_review_queue_tab(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            return
+        self._reload_review_queue()
+        self._activate_tab("ASR & Dịch")
+        pending_review_count = self._pending_review_count()
+        if pending_review_count <= 0:
+            QMessageBox.information(self, "Review ngữ cảnh", "Hiện không còn dòng review nào cần xử lý.")
+            return
+        if self._review_table.rowCount() > 0:
+            self._review_table.selectRow(0)
+        self._review_table.setFocus()
+
+    def _start_simple_finish_workflow(self) -> None:
+        if not self._current_workspace:
+            QMessageBox.warning(self, "Chưa có dự án", "Hãy tạo hoặc mở dự án trước.")
+            return
+        pending_review_count = self._pending_review_count()
+        if pending_review_count > 0:
+            self._open_review_queue_tab()
+            QMessageBox.warning(
+                self,
+                "Hoàn thiện video",
+                (
+                    f"Còn {pending_review_count} dòng chưa qua semantic review/QC.\n"
+                    "Hãy xử lý review trước rồi bấm lại `Hoàn thiện video`."
+                ),
+            )
+            return
+        self._start_workflow(
+            ["tts", "voice_track", "mixdown", "export_video"],
+            workflow_name="Hoàn thiện video",
+        )
+
+    def _refresh_export_access_actions(self) -> None:
+        output_path = self._last_export_output
+        export_ready = bool(output_path and Path(output_path).exists())
+        if getattr(self, "_open_export_video_button", None) is None:
+            return
+        self._open_export_video_button.setEnabled(export_ready)
+        self._open_export_video_button.setToolTip(
+            f"Mở video export cuối cùng:\n{output_path}"
+            if export_ready and output_path is not None
+            else "Chưa có video export nào sẵn sàng."
+        )
+
+    def _open_last_export_video(self) -> None:
+        output_path = self._last_export_output
+        if output_path is None or not Path(output_path).exists():
+            self._refresh_export_access_actions()
+            QMessageBox.information(
+                self,
+                "Mở video xuất",
+                "Chưa có video export nào sẵn sàng để mở.",
+            )
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_path))):
+            QMessageBox.warning(
+                self,
+                "Mở video xuất",
+                f"Không thể mở video export:\n{output_path}",
+            )
+
     def _run_next_workflow_stage(self) -> None:
         if not self._workflow_queue:
             self._workflow_current_stage = None
@@ -2044,6 +2617,7 @@ class MainWindow(QMainWindow):
             self._subtitle_table.setRowCount(0)
             self._subtitle_segment_snapshot = {}
             self._subtitle_editor_dirty = False
+            self._sync_subtitle_subtext_toggle()
             self._subtitle_editor_status.setText("Chưa mở dự án")
             return
         if self._subtitle_editor_dirty and not force:
@@ -2066,6 +2640,7 @@ class MainWindow(QMainWindow):
             }
         self._subtitle_editor_dirty = False
         self._clear_subtitle_qc_ui()
+        self._sync_subtitle_subtext_toggle()
         self._subtitle_editor_status.setText(
             f"Đã nạp {len(subtitle_rows)} dòng từ {self._subtitle_track_label(active_track)} vào trình biên tập"
         )
@@ -2288,7 +2863,12 @@ class MainWindow(QMainWindow):
 
         try:
             self._cancel_preview_reload()
-            ass_path = export_preview_subtitles(workspace, segments=subtitle_rows, format_name="ass")
+            ass_path = export_preview_subtitles(
+                workspace,
+                segments=subtitle_rows,
+                format_name="ass",
+                subtitle_subtext_mode=self._current_subtitle_subtext_mode(),
+            )
             self._live_preview_ass_path = ass_path
             self._last_subtitle_outputs["ass"] = ass_path
             self._preview_controller.preview(
@@ -2441,14 +3021,14 @@ class MainWindow(QMainWindow):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn tệp BGM",
-            str(Path.cwd()),
+            str(self._video_dialog_start_dir()),
             "Tệp âm thanh (*.wav *.mp3 *.m4a *.aac *.flac *.ogg);;Tất cả tệp (*.*)",
         )
         if file_path:
             self._bgm_path_input.setText(file_path)
 
     def _choose_vieneu_ref_audio_file(self) -> None:
-        initial_dir = self._current_workspace.root_dir if self._current_workspace else Path.cwd()
+        initial_dir = self._current_workspace.root_dir if self._current_workspace else self._video_dialog_start_dir()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn audio mẫu cho VieNeu clone",
@@ -2460,7 +3040,7 @@ class MainWindow(QMainWindow):
             self._refresh_workspace_views()
 
     def _choose_watermark_file(self) -> None:
-        initial_dir = self._current_workspace.root_dir if self._current_workspace else Path.cwd()
+        initial_dir = self._current_workspace.root_dir if self._current_workspace else self._video_dialog_start_dir()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Chọn watermark hoặc logo",
@@ -5145,6 +5725,7 @@ class MainWindow(QMainWindow):
     def _sync_settings_to_form(self) -> None:
         dependency_paths = self._settings.dependency_paths
         self._ui_language_input.setText(self._settings.ui_language)
+        self._sync_ui_mode_controls()
         self._ffmpeg_path_input.setText(dependency_paths.ffmpeg_path or "")
         self._ffprobe_path_input.setText(dependency_paths.ffprobe_path or "")
         self._mpv_path_input.setText(dependency_paths.mpv_dll_path or "")
@@ -5156,6 +5737,10 @@ class MainWindow(QMainWindow):
     def _save_settings(self) -> None:
         dependency_paths = self._settings.dependency_paths
         self._settings.ui_language = self._ui_language_input.text().strip() or "vi"
+        if self._settings_ui_mode_combo is not None:
+            self._settings.ui_mode = normalize_ui_mode(
+                str(self._settings_ui_mode_combo.currentData() or UI_MODE_SIMPLE_V2)
+            )
         dependency_paths.ffmpeg_path = self._ffmpeg_path_input.text().strip() or None
         dependency_paths.ffprobe_path = self._ffprobe_path_input.text().strip() or None
         dependency_paths.mpv_dll_path = self._mpv_path_input.text().strip() or None
@@ -5165,6 +5750,9 @@ class MainWindow(QMainWindow):
             self._default_translation_model_input.text().strip() or "gpt-4.1-mini"
         )
         save_settings(self._settings)
+        self._sync_ui_mode_controls()
+        self._reload_project_profile_options()
+        self._apply_ui_mode()
         self._append_log_line("Đã lưu cài đặt")
         QMessageBox.information(self, "Đã lưu", "Cài đặt ứng dụng đã được lưu.")
 
@@ -5564,6 +6152,12 @@ class MainWindow(QMainWindow):
         self._prompt_combo.clear()
         for template in self._prompt_templates:
             self._prompt_combo.addItem(f"{template.name} ({template.template_id})", template.template_id)
+        state = load_project_profile_state(self._current_workspace.root_dir)
+        recommended_template_id = state.recommended_prompt_template_id if state is not None else None
+        if recommended_template_id:
+            index = self._prompt_combo.findData(recommended_template_id)
+            if index >= 0:
+                self._prompt_combo.setCurrentIndex(index)
 
     def _selected_prompt_template(self):
         if not self._prompt_templates:
@@ -6589,6 +7183,7 @@ class MainWindow(QMainWindow):
                 segments=subtitle_rows,
                 format_name=format_name,
                 allow_source_fallback=not require_localized,
+                subtitle_subtext_mode=self._current_subtitle_subtext_mode(),
             )
             context.report_progress(100, f"Đã tạo {format_name.upper()}")
             return JobResult(
@@ -6757,6 +7352,7 @@ class MainWindow(QMainWindow):
                 segments=subtitle_rows,
                 format_name=subtitle_format,
                 allow_source_fallback=not require_localized,
+                subtitle_subtext_mode=self._current_subtitle_subtext_mode(),
             )
             output_path = export_hardsub_video(
                 context,
@@ -7318,6 +7914,7 @@ class MainWindow(QMainWindow):
             f"- Video đầu ra: {'Sẵn sàng' if self._last_export_output and self._last_export_output.exists() else 'Chưa có'}",
         ]
         self._pipeline_summary.setText("\n".join(pipeline_lines))
+        self._refresh_export_access_actions()
         if not self._workflow_current_stage:
             self._update_workflow_status_label()
 

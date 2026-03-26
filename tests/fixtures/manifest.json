@@ -195,6 +195,17 @@
       "notes": "Case trước review với thuật ngữ mơ hồ. Intended behavior là giữ needs_review và block downstream cho tới khi con người chốt nghĩa."
     },
     {
+      "fixture_id": "zh-vi-narration-scientific-notation-autofix",
+      "class": "narration_scientific_notation_autofix",
+      "languages": [
+        "zh",
+        "vi"
+      ],
+      "kind": "regression",
+      "path": "tests/fixtures/regression/zh-vi-narration-scientific-notation-autofix.json",
+      "notes": "Case narration V2 với notation khoa học bị rụng số mũ. Intended behavior là local post-process chỉ auto-repair khi neighboring numeric hint là duy nhất; nếu không thì vẫn giữ review."
+    },
+    {
       "fixture_id": "zh-vi-ambiguous-object-reference-pre-review-failsafe",
       "class": "pre_review_ambiguous_object_reference_fail_safe",
       "languages": [

@@ -133,7 +133,7 @@ def _is_narration_incremental_candidate(*, workspace, database: ProjectDatabase,
             return ""
 
     all_fast_narration = bool(analysis_rows) and all(
-        (_route_family_id(row) == "contextual-narration-fast-vi")
+        (_route_family_id(row) in {"contextual-narration-fast-vi", "contextual-narration-fast-v2-vi"})
         for row in analysis_rows
     )
     if not profile_is_narration and not all_fast_narration:

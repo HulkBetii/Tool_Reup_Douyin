@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from app.project.bootstrap import bootstrap_project
 from app.project.database import ProjectDatabase
 from app.project.models import ProjectInitRequest
+from app.translate.contextual_checkpoint import load_contextual_translation_checkpoint, persist_contextual_translation_checkpoint
 from app.translate.contextual_runtime import (
     _fallback_term_anchor_segment_ids,
     _normalize_review_reason_code,
@@ -1198,3 +1199,244 @@ def test_run_contextual_translation_downshifts_future_narration_batches_after_un
     assert engine.adaptation_batch_sizes == [16, 16, 8]
     assert result["metrics"].narration_batch_size_caps["semantic_pass"] == int(fixture["reduced_batch_size"])
     assert result["fast_path"]["adaptive_batch_caps"]["semantic_pass"] == int(fixture["reduced_batch_size"])
+
+
+class _CheckpointResumeEngine:
+    def __init__(self, *, fail_after_scene_id: str | None = None) -> None:
+        self.fail_after_scene_id = fail_after_scene_id
+        self.scene_plan_calls: list[str] = []
+        self.semantic_calls: list[str] = []
+        self.adaptation_calls: list[str] = []
+
+    def plan_scene(self, *_args, **kwargs):
+        scene_id = str(kwargs["scene_payload"]["scene_id"])
+        self.scene_plan_calls.append(scene_id)
+        return ScenePlannerOutput(
+            participants=["narrator"],
+            scene_summary=f"Plan {scene_id}",
+            recent_turn_digest="",
+            location="",
+            time_context="",
+            active_topic="",
+            current_conflict="",
+            current_emotional_tone="neutral",
+            temporary_addressing_mode="",
+            who_knows_what=[],
+            open_ambiguities=[],
+            unresolved_references=[],
+            character_updates=[],
+            relationship_updates=[],
+        )
+
+    def analyze_semantics(self, _context, **kwargs):
+        scene = kwargs["batch_payload"]["scene"]
+        scene_id = str(scene["scene_id"])
+        self.semantic_calls.append(scene_id)
+        return NarrationSemanticBatchOutput(
+            items=[
+                NarrationSemanticAnalysisItem(
+                    speaker=SpeakerDecision(character_id="narrator", source="narration", confidence=0.99),
+                    listeners=[ListenerDecision(character_id="audience", role="audience", confidence=0.99)],
+                    turn_function="inform",
+                    register=RegisterDecision(
+                        politeness="neutral",
+                        power_direction="neutral",
+                        emotional_tone="informative",
+                        confidence=0.95,
+                    ),
+                    resolved_ellipsis=ResolvedEllipsis(confidence=0.9),
+                    honorific_policy=HonorificPolicy(),
+                    semantic_translation=f"VI semantic {item['segment_index']}",
+                    glossary_hits=[],
+                    risk_flags=[],
+                    confidence=ConfidenceBreakdown(
+                        overall=0.92,
+                        speaker=0.99,
+                        listener=0.99,
+                        register=0.95,
+                        relation=0.0,
+                        translation=0.9,
+                    ),
+                    needs_human_review=False,
+                    review_reason_codes=[],
+                    review_question="",
+                )
+                for item in scene["segments"]
+            ]
+        )
+
+    def adapt_dialogue(self, _context, **kwargs):
+        scene = kwargs["batch_payload"]["scene"]
+        scene_id = str(scene["scene_id"])
+        self.adaptation_calls.append(scene_id)
+        output = NarrationAdaptationBatchOutput(
+            items=[
+                NarrationAdaptationItem(
+                    honorific_policy=HonorificPolicy(),
+                    subtitle_text=f"VI {item['segment_index']}",
+                    tts_text=f"VI {item['segment_index']}",
+                    risk_flags=[],
+                    needs_human_review=False,
+                    review_reason_codes=[],
+                )
+                for item in scene["segments"]
+            ]
+        )
+        if self.fail_after_scene_id == scene_id:
+            raise RuntimeError(f"synthetic failure after {scene_id}")
+        return output
+
+    def critique_dialogue(self, *_args, **_kwargs):
+        raise AssertionError("Narration fast path should not call semantic critic")
+
+    def extract_term_entities(self, *_args, **_kwargs):
+        return NarrationTermEntityBatchOutput(items=[])
+
+
+def test_run_contextual_translation_resume_from_checkpoint_skips_completed_scenes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Checkpoint Runtime",
+            root_dir=tmp_path / "narration-checkpoint-runtime",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-vieneu",
+        )
+    )
+    database = ProjectDatabase(workspace.database_path)
+    selected_template = load_prompt_template(workspace.root_dir, "contextual_narration_fast_adaptation")
+    context = _DummyContext()
+
+    scene_one_segments = [
+        {
+            "segment_id": "scene-1-seg-0",
+            "segment_index": 0,
+            "start_ms": 0,
+            "end_ms": 900,
+            "source_text": "这是第一段解说。",
+        },
+        {
+            "segment_id": "scene-1-seg-1",
+            "segment_index": 1,
+            "start_ms": 1000,
+            "end_ms": 1900,
+            "source_text": "这一段继续说明背景。",
+        },
+    ]
+    scene_two_segments = [
+        {
+            "segment_id": "scene-2-seg-0",
+            "segment_index": 2,
+            "start_ms": 2000,
+            "end_ms": 2900,
+            "source_text": "这是第二段解说。",
+        },
+        {
+            "segment_id": "scene-2-seg-1",
+            "segment_index": 3,
+            "start_ms": 3000,
+            "end_ms": 3900,
+            "source_text": "这一段会触发恢复测试。",
+        },
+    ]
+    scene_one = SceneChunk(
+        scene_id="scene_0000",
+        scene_index=0,
+        start_segment_index=0,
+        end_segment_index=1,
+        start_ms=0,
+        end_ms=1900,
+        segment_ids=["scene-1-seg-0", "scene-1-seg-1"],
+        segments=scene_one_segments,
+    )
+    scene_two = SceneChunk(
+        scene_id="scene_0001",
+        scene_index=1,
+        start_segment_index=2,
+        end_segment_index=3,
+        start_ms=2000,
+        end_ms=3900,
+        segment_ids=["scene-2-seg-0", "scene-2-seg-1"],
+        segments=scene_two_segments,
+    )
+    monkeypatch.setattr(
+        "app.translate.contextual_runtime.chunk_segments_into_scenes",
+        lambda _segments: [scene_one, scene_two],
+    )
+
+    checkpoint_snapshots: list[list[str]] = []
+    failing_engine = _CheckpointResumeEngine(fail_after_scene_id="scene_0001")
+
+    def checkpoint_writer(
+        scenes,
+        character_profiles,
+        relationship_profiles,
+        analyses,
+        route_decisions,
+        term_entity_sheets,
+        metrics,
+        completed_scene_ids,
+        total_scene_count,
+    ):
+        checkpoint_snapshots.append(list(completed_scene_ids))
+        return persist_contextual_translation_checkpoint(
+            workspace,
+            stage_hash="checkpoint-test",
+            selected_template=selected_template,
+            scenes=scenes,
+            character_profiles=character_profiles,
+            relationship_profiles=relationship_profiles,
+            analyses=analyses,
+            route_decisions=route_decisions,
+            term_entity_sheets=term_entity_sheets,
+            metrics=metrics,
+            completed_scene_ids=completed_scene_ids,
+            total_scene_count=total_scene_count,
+        )
+
+    try:
+        run_contextual_translation(
+            context,
+            workspace=workspace,
+            database=database,
+            engine=failing_engine,
+            segments=[*scene_one_segments, *scene_two_segments],
+            selected_template=selected_template,
+            source_language="zh",
+            target_language="vi",
+            model="gpt-test",
+            checkpoint_writer=checkpoint_writer,
+        )
+    except RuntimeError as exc:
+        assert "scene_0001" in str(exc)
+    else:
+        raise AssertionError("Expected synthetic scene failure")
+
+    assert checkpoint_snapshots == [["scene_0000"]]
+    checkpoint_state = load_contextual_translation_checkpoint(workspace, stage_hash="checkpoint-test")
+    assert checkpoint_state is not None
+    assert checkpoint_state.completed_scene_ids == ["scene_0000"]
+    assert [item.scene_id for item in checkpoint_state.scenes] == ["scene_0000"]
+    assert len(checkpoint_state.analyses) == 2
+
+    resume_engine = _CheckpointResumeEngine()
+    result = run_contextual_translation(
+        context,
+        workspace=workspace,
+        database=database,
+        engine=resume_engine,
+        segments=[*scene_one_segments, *scene_two_segments],
+        selected_template=selected_template,
+        source_language="zh",
+        target_language="vi",
+        model="gpt-test",
+        checkpoint_state=checkpoint_state,
+    )
+
+    assert resume_engine.semantic_calls == ["scene_0001"]
+    assert resume_engine.adaptation_calls == ["scene_0001"]
+    assert [item.scene_id for item in result["scenes"]] == ["scene_0000", "scene_0001"]
+    assert len(result["segment_analyses"]) == 4
+    assert result["semantic_qc"]["error_count"] == 0

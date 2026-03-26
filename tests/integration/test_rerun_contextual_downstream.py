@@ -97,6 +97,35 @@ def test_narration_incremental_candidate_accepts_narration_profile_without_polic
     assert reason == ""
 
 
+def test_narration_incremental_candidate_accepts_v2_family_without_policy_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script_module()
+    workspace = SimpleNamespace(root_dir=Path("C:/demo"), project_id="project-1")
+    database = SimpleNamespace(
+        list_segment_analyses=lambda _project_id: [
+            {"source_template_family_id": "contextual-narration-fast-v2-vi"},
+            {"source_template_family_id": "contextual-narration-fast-v2-vi"},
+        ]
+    )
+    voice_plan = SimpleNamespace(active_bindings=False, active_voice_policies=False)
+
+    monkeypatch.setattr(
+        module,
+        "load_project_profile_state",
+        lambda _root_dir: SimpleNamespace(project_profile_id="zh-vi-narration-fast-v2-vieneu"),
+    )
+
+    candidate, reason = module._is_narration_incremental_candidate(
+        workspace=workspace,
+        database=database,
+        voice_plan=voice_plan,
+    )
+
+    assert candidate is True
+    assert reason == ""
+
+
 def test_narration_incremental_candidate_rejects_projects_with_voice_policy_conflicts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

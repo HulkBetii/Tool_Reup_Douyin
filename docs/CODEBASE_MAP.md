@@ -24,6 +24,9 @@ This is a practical working map for regression-first debugging.
   - key files:
     - [src/app/core/settings.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\core\settings.py)
     - [src/app/core/jobs.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\core\jobs.py)
+    - [src/app/core/logging.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\core\logging.py)
+  - runtime note:
+    - [src/app/core/logging.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\core\logging.py) must treat console logging as best-effort only in frozen Windows builds: missing `stderr/stdout` or cp1252-incompatible Unicode from third-party libraries must not break the real job path or suppress `failed` state updates in UI.
 
 - project
   - project bootstrap, workspace layout, SQLite schema, runtime restore, reusable project profiles
@@ -41,7 +44,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/ops/project_safety.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\project_safety.py)
     - [src/app/ops/cache_ops.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\cache_ops.py)
     - [src/app/ops/release_validation.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ops\release_validation.py)
-    - [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
+- [scripts/smoke_release_bundle.ps1](C:\Users\HulkBeoti\Documents\Reup_Video\scripts\smoke_release_bundle.ps1)
+- [build/pyinstaller.spec](C:\Users\HulkBeoti\Documents\Reup_Video\build\pyinstaller.spec) must collect `neucodec`, `llama_cpp`, and `sea_g2p` with source files (`pyz+py`): `neucodec` needs original `.py` source for `@torch.jit.script` helpers at import time, `llama_cpp` resolves its GGUF DLLs relative to `__file__` under `llama_cpp\lib`, and `sea_g2p` resolves its runtime dictionary `sea_g2p.bin` relative to `__file__`; it also explicitly excludes `tkinter/_tkinter`, because the app is PySide-only and frozen bundles should not crash at launch on missing `_tcl_data`.
 
 - media
   - ffprobe and audio extraction cache
@@ -63,6 +67,7 @@ This is a practical working map for regression-first debugging.
     - [src/app/translate/openai_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\openai_engine.py)
     - [src/app/translate/contextual_pipeline.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_pipeline.py)
     - [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py)
+    - [src/app/translate/narration_fast_v2.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\narration_fast_v2.py)
     - [src/app/translate/scene_chunker.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\scene_chunker.py)
     - [src/app/translate/semantic_qc.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\semantic_qc.py)
   - runtime note:
@@ -70,6 +75,8 @@ This is a practical working map for regression-first debugging.
     - narration routing now happens per-scene inside [src/app/translate/contextual_runtime.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_runtime.py): narration-like scenes use deterministic planner + positional structured outputs, while dialogue/borderline scenes fall back to the full dialogue path.
     - narration scenes may also run a lightweight `term/entity mini-pass` before semantic/adaptation. The resulting scene-level term sheet is injected back into narration glossary payloads, and `needs_review` term hints should route the affected segments to review instead of silent guessing.
     - [src/app/translate/openai_engine.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\openai_engine.py) now builds stable `prompt_cache_key` values and uses a fixed prompt section order (`constraints -> context -> glossary -> source`) to maximize prompt-cache reuse.
+    - [src/app/translate/contextual_checkpoint.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\contextual_checkpoint.py) stores scene-level partial checkpoints for long contextual runs so narration projects can resume after network/API failures instead of restarting from scene 0.
+- [src/app/translate/narration_fast_v2.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\translate\narration_fast_v2.py) is the low-cost narration lane: scene routing -> span builder -> canonical-only semantic pass -> sparse escalation -> budget governor; it also has a deterministic scientific-notation repair for incomplete forms like `10^` when adjacent narration lines provide one unique exponent hint, and otherwise keeps the segment in review.
 
 - subtitle
   - editor helpers, subtitle QC, preview, SRT/ASS export, hard-sub rendering
@@ -78,6 +85,8 @@ This is a practical working map for regression-first debugging.
     - [src/app/subtitle/qc.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\subtitle\qc.py)
     - [src/app/subtitle/export.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\subtitle\export.py)
     - [src/app/subtitle/hardsub.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\subtitle\hardsub.py)
+  - runtime note:
+    - subtitle export now fingerprints `subtitle_subtext_mode` and can optionally render `source_text` as `Subtext gốc` under the main subtitle line for preview/export/hardsub. This is visual-only and must not dirty audio/TTS artifacts.
 
 - tts / audio
   - TTS engines, voice presets, speaker binding, voice policy, stage hashing, voice track building, mixdown
@@ -158,11 +167,14 @@ Narration incremental rerun v1:
 - applied profile state lives under `workspace/.ops/project_profile_state.json`
 - current built-in narration profile:
   - `zh-vi-narration-clear-vieneu`
+  - `zh-vi-narration-fast-vieneu`
+  - `zh-vi-narration-fast-v2-vieneu`
   - intended for science/exploration/wilderness narration
   - applies:
     - `vieneu-default-vi speed = 0.93`
     - `default-ass FontSize = 12`
     - recommended downstream mix default `original_volume = 0.07`
+  - profile state may also persist `subtitle_subtext_mode` for project-local subtitle rendering
 - key files:
   - [src/app/project/profiles.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\profiles.py)
   - [docs/PROJECT_PROFILES.md](C:\Users\HulkBeoti\Documents\Reup_Video\docs\PROJECT_PROFILES.md)

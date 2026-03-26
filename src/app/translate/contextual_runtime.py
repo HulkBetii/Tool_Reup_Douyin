@@ -15,6 +15,7 @@ from app.project.models import CharacterProfileRecord, RelationshipProfileRecord
 from app.project.profiles import load_project_profile_state
 from app.translate.relationship_memory import clone_allowed_alternates
 
+from .contextual_checkpoint import ContextualTranslationCheckpointState
 from .contextual_pipeline import (
     CONTEXTUAL_STAGE_BATCH_SIZE,
     _build_context_payload,
@@ -43,7 +44,12 @@ from .models import (
     TranslationPromptTemplate,
 )
 from .openai_engine import OpenAITranslationEngine
-from .presets import is_narration_fast_template, load_prompt_template, resolve_prompt_family
+from .presets import (
+    is_narration_fast_template,
+    is_narration_fast_v2_template,
+    load_prompt_template,
+    resolve_prompt_family,
+)
 from .scene_chunker import chunk_segments_into_scenes
 from .semantic_qc import analyze_segment_analyses
 
@@ -621,7 +627,26 @@ def run_contextual_translation(
     source_language: str,
     target_language: str,
     model: str,
+    checkpoint_state: ContextualTranslationCheckpointState | None = None,
+    checkpoint_writer: Callable[[list[SceneMemoryRecord], list[CharacterProfileRecord], list[RelationshipProfileRecord], list[SegmentAnalysisRecord], list[SceneRouteDecision], list[SceneTermEntitySheet], ContextualRunMetrics, list[str], int], None] | None = None,
 ) -> dict[str, object]:
+    if is_narration_fast_v2_template(selected_template):
+        from .narration_fast_v2 import run_contextual_translation_v2
+
+        return run_contextual_translation_v2(
+            context,
+            workspace=workspace,
+            database=database,
+            engine=engine,
+            segments=segments,
+            selected_template=selected_template,
+            source_language=source_language,
+            target_language=target_language,
+            model=model,
+            checkpoint_state=checkpoint_state,
+            checkpoint_writer=checkpoint_writer,
+        )
+
     selected_prompt_family = resolve_prompt_family(workspace.root_dir, selected_template)
     profile_state = load_project_profile_state(workspace.root_dir)
     project_profile_id = profile_state.project_profile_id if profile_state is not None else None
@@ -655,11 +680,33 @@ def run_contextual_translation(
         str(row["segment_id"]): dict(row)
         for row in database.list_segment_analyses(workspace.project_id)
     }
-    route_decisions: list[SceneRouteDecision] = []
-    metrics = ContextualRunMetrics()
-    narration_semantic_batch_cap = NARRATION_FAST_BATCH_SIZE
-    narration_adaptation_batch_cap = NARRATION_FAST_BATCH_SIZE
-    term_entity_sheets: list[SceneTermEntitySheet] = []
+    if checkpoint_state is not None:
+        for item in checkpoint_state.analyses:
+            prior_analysis_rows.setdefault(
+                item.segment_id,
+                {
+                    "segment_id": item.segment_id,
+                    "speaker_json": item.speaker_json,
+                    "review_reason_codes_json": item.review_reason_codes_json,
+                },
+            )
+    route_decisions: list[SceneRouteDecision] = list(checkpoint_state.route_decisions) if checkpoint_state else []
+    metrics = checkpoint_state.metrics if checkpoint_state is not None else ContextualRunMetrics()
+    narration_semantic_batch_cap = (
+        int(metrics.narration_batch_size_caps.get("semantic_pass", NARRATION_FAST_BATCH_SIZE))
+        if checkpoint_state is not None
+        else NARRATION_FAST_BATCH_SIZE
+    )
+    narration_adaptation_batch_cap = (
+        int(metrics.narration_batch_size_caps.get("dialogue_adaptation", NARRATION_FAST_BATCH_SIZE))
+        if checkpoint_state is not None
+        else NARRATION_FAST_BATCH_SIZE
+    )
+    term_entity_sheets: list[SceneTermEntitySheet] = (
+        list(checkpoint_state.term_entity_sheets)
+        if checkpoint_state is not None
+        else []
+    )
     metrics.narration_batch_size_caps = {
         "semantic_pass": narration_semantic_batch_cap,
         "dialogue_adaptation": narration_adaptation_batch_cap,
@@ -672,58 +719,67 @@ def run_contextual_translation(
     def _count_retry() -> None:
         metrics.llm_retry_count += 1
 
-    scene_records: list[SceneMemoryRecord] = []
-    character_profiles: dict[str, CharacterProfileRecord] = {
-        str(row["character_id"]): CharacterProfileRecord(
-            character_id=str(row["character_id"]),
-            project_id=workspace.project_id,
-            canonical_name_zh=row["canonical_name_zh"] or "",
-            canonical_name_vi=row["canonical_name_vi"] or "",
-            aliases_json=json.loads(row["aliases_json"] or "[]"),
-            gender_hint=row["gender_hint"],
-            age_role=row["age_role"],
-            social_role=row["social_role"],
-            speech_style=row["speech_style"],
-            default_register_profile_json=json.loads(row["default_register_profile_json"] or "{}"),
-            default_self_terms_json=json.loads(row["default_self_terms_json"] or "[]"),
-            default_address_terms_json=json.loads(row["default_address_terms_json"] or "[]"),
-            forbidden_terms_json=json.loads(row["forbidden_terms_json"] or "[]"),
-            evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),
-            confidence=float(row["confidence"] or 0.0),
-            status=row["status"] or "hypothesized",
-            notes=row["notes"] or "",
-            created_at=row["created_at"] or now,
-            updated_at=now,
-        )
-        for row in database.list_character_profiles(workspace.project_id)
-    }
-    relationship_profiles: dict[str, RelationshipProfileRecord] = {
-        str(row["relationship_id"]): RelationshipProfileRecord(
-            relationship_id=str(row["relationship_id"]),
-            project_id=workspace.project_id,
-            from_character_id=str(row["from_character_id"]),
-            to_character_id=str(row["to_character_id"]),
-            relation_type=row["relation_type"] or "unknown",
-            power_delta=row["power_delta"],
-            age_delta=row["age_delta"],
-            intimacy_level=row["intimacy_level"],
-            default_self_term=row["default_self_term"],
-            default_address_term=row["default_address_term"],
-            allowed_alternates_json=clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
-            scope=row["scope"] or "scene",
-            status=row["status"] or "hypothesized",
-            evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),
-            last_updated_scene_id=row["last_updated_scene_id"],
-            notes=row["notes"] or "",
-            created_at=row["created_at"] or now,
-            updated_at=now,
-        )
-        for row in database.list_relationship_profiles(workspace.project_id)
-    }
-    analyses: list[SegmentAnalysisRecord] = []
+    scene_records: list[SceneMemoryRecord] = list(checkpoint_state.scenes) if checkpoint_state is not None else []
+    if checkpoint_state is not None:
+        character_profiles = {item.character_id: item for item in checkpoint_state.character_profiles}
+    else:
+        character_profiles = {
+            str(row["character_id"]): CharacterProfileRecord(
+                character_id=str(row["character_id"]),
+                project_id=workspace.project_id,
+                canonical_name_zh=row["canonical_name_zh"] or "",
+                canonical_name_vi=row["canonical_name_vi"] or "",
+                aliases_json=json.loads(row["aliases_json"] or "[]"),
+                gender_hint=row["gender_hint"],
+                age_role=row["age_role"],
+                social_role=row["social_role"],
+                speech_style=row["speech_style"],
+                default_register_profile_json=json.loads(row["default_register_profile_json"] or "{}"),
+                default_self_terms_json=json.loads(row["default_self_terms_json"] or "[]"),
+                default_address_terms_json=json.loads(row["default_address_terms_json"] or "[]"),
+                forbidden_terms_json=json.loads(row["forbidden_terms_json"] or "[]"),
+                evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),
+                confidence=float(row["confidence"] or 0.0),
+                status=row["status"] or "hypothesized",
+                notes=row["notes"] or "",
+                created_at=row["created_at"] or now,
+                updated_at=now,
+            )
+            for row in database.list_character_profiles(workspace.project_id)
+        }
+    if checkpoint_state is not None:
+        relationship_profiles = {item.relationship_id: item for item in checkpoint_state.relationship_profiles}
+    else:
+        relationship_profiles = {
+            str(row["relationship_id"]): RelationshipProfileRecord(
+                relationship_id=str(row["relationship_id"]),
+                project_id=workspace.project_id,
+                from_character_id=str(row["from_character_id"]),
+                to_character_id=str(row["to_character_id"]),
+                relation_type=row["relation_type"] or "unknown",
+                power_delta=row["power_delta"],
+                age_delta=row["age_delta"],
+                intimacy_level=row["intimacy_level"],
+                default_self_term=row["default_self_term"],
+                default_address_term=row["default_address_term"],
+                allowed_alternates_json=clone_allowed_alternates(json.loads(row["allowed_alternates_json"] or "[]")),
+                scope=row["scope"] or "scene",
+                status=row["status"] or "hypothesized",
+                evidence_segment_ids_json=json.loads(row["evidence_segment_ids_json"] or "[]"),
+                last_updated_scene_id=row["last_updated_scene_id"],
+                notes=row["notes"] or "",
+                created_at=row["created_at"] or now,
+                updated_at=now,
+            )
+            for row in database.list_relationship_profiles(workspace.project_id)
+        }
+    analyses: list[SegmentAnalysisRecord] = list(checkpoint_state.analyses) if checkpoint_state is not None else []
+    completed_scene_ids = set(checkpoint_state.completed_scene_ids) if checkpoint_state is not None else set()
 
     total_scenes = max(1, len(scenes))
     for scene_position, scene in enumerate(scenes, start=1):
+        if scene.scene_id in completed_scene_ids:
+            continue
         if narration_routing_enabled:
             route_decision = _route_scene(
                 scene,
@@ -1318,6 +1374,19 @@ def run_contextual_translation(
                     created_at=now,
                     updated_at=now,
                 )
+            )
+        completed_scene_ids.add(scene.scene_id)
+        if checkpoint_writer is not None:
+            checkpoint_writer(
+                scene_records,
+                list(character_profiles.values()),
+                list(relationship_profiles.values()),
+                analyses,
+                route_decisions,
+                term_entity_sheets,
+                metrics,
+                sorted(completed_scene_ids),
+                total_scenes,
             )
 
     relationship_defaults = _relationship_defaults_map(database, workspace.project_id)

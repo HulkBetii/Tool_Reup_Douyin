@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -8,6 +9,48 @@ from app.core.paths import get_logs_dir
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 _ROOT_CONFIGURED = False
+
+
+class SafeConsoleHandler(logging.StreamHandler):
+    """Best-effort console logging for windowed Windows bundles.
+
+    Frozen PySide builds may run without a writable stderr/stdout, and some
+    third-party libraries emit Unicode that cannot be encoded by legacy Windows
+    code pages. Console logging must never break the actual job flow.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - exercised via tests
+        stream = self.stream
+        if stream is None or not hasattr(stream, "write"):
+            return
+
+        try:
+            message = self.format(record)
+            terminator = getattr(self, "terminator", "\n")
+            try:
+                stream.write(message + terminator)
+            except UnicodeEncodeError:
+                encoding = getattr(stream, "encoding", None) or "utf-8"
+                fallback_text = (message + terminator).encode(
+                    encoding,
+                    errors="backslashreplace",
+                ).decode(encoding, errors="ignore")
+                stream.write(fallback_text)
+            if hasattr(stream, "flush"):
+                stream.flush()
+        except RecursionError:
+            raise
+        except Exception:
+            # Console logging is best-effort only. File/job handlers still
+            # capture the real error, so avoid cascading failures here.
+            return
+
+
+def _resolve_console_stream():
+    for stream in (sys.stderr, sys.stdout):
+        if stream is not None and hasattr(stream, "write"):
+            return stream
+    return None
 
 
 def get_job_log_path(job_id: str, appdata_dir: Path | None = None) -> Path:
@@ -25,10 +68,12 @@ def configure_logging(level: int = logging.INFO, appdata_dir: Path | None = None
 
     formatter = logging.Formatter(LOG_FORMAT)
 
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.set_name("console")
-    root_logger.addHandler(console_handler)
+    console_stream = _resolve_console_stream()
+    if console_stream is not None:
+        console_handler = SafeConsoleHandler(console_stream)
+        console_handler.setFormatter(formatter)
+        console_handler.set_name("console")
+        root_logger.addHandler(console_handler)
 
     app_log_path = get_logs_dir(appdata_dir) / "app.log"
     app_file_handler = RotatingFileHandler(
@@ -70,4 +115,3 @@ def get_logger(name: str, job_id: str | None = None, appdata_dir: Path | None = 
     job_handler.set_name(handler_name)
     logger.addHandler(job_handler)
     return logger
-

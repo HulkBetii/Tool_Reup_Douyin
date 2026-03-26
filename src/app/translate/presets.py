@@ -248,6 +248,112 @@ def _contextual_templates() -> list[TranslationPromptTemplate]:
             notes="Narration fast adaptation keeps subtitle/TTS close to reduce review churn and reruns.",
         ),
         TranslationPromptTemplate(
+            template_id="contextual_narration_semantic_v2",
+            family_id="contextual-narration-fast-v2-vi",
+            translation_mode="contextual_v2",
+            role="semantic_pass",
+            name="Narration Fast V2 / Semantic",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Translate Chinese narration into one stable Vietnamese canonical_text per segment. "
+                "Return exactly one item for every render unit in span.render_units, in the same order. "
+                "Do not emit segment_id fields, do not merge, omit, duplicate, or reorder items. "
+                "canonical_text must stay factual, concise, and neutral. subtitle_text and tts_text will "
+                "be derived locally from canonical_text, so do not create dialogue flourishes. Use risk_flags "
+                "only for concrete risk classes such as entity_new, number_sensitive, pronoun_ambiguous, "
+                "idiom_ambiguous, unsafe_to_guess, or needs_shortening."
+            ),
+            user_prompt_template=(
+                "Produce one Vietnamese canonical_text per narration render unit from {source_language} to "
+                "{target_language}. Return exactly one item per render unit in span.render_units and keep "
+                "the order identical. Keep output compact and semantic-first. Use approved glossary entries "
+                "when present. If a fact, entity, or referent is not safe to guess, set flags instead of "
+                "inventing certainty. Context: {context}. Glossary: {glossary}. Constraints: {constraints}. "
+                "Data: {source}"
+            ),
+            output_schema_version=1,
+            default_constraints_json={
+                "canonical_only": True,
+                "max_lines": 2,
+                "max_cpl": 38,
+                "target_cps": 16,
+            },
+            notes="Narration fast v2 base semantic pass returns canonical_text only.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_narration_entity_micro",
+            family_id="contextual-narration-fast-v2-vi",
+            translation_mode="contextual_v2",
+            role="entity_micro_pass",
+            name="Narration Fast V2 / Entity",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Resolve only the entity or technical-term spans provided. Return short approved_target "
+                "choices when safe, otherwise keep status conservative. Never rewrite the whole narration."
+            ),
+            user_prompt_template=(
+                "Resolve entity or technical-term spans from {source_language} to {target_language}. "
+                "Only work on the listed candidate terms and their short local context. Prefer approved "
+                "memory if it fits. If a term is still not safe to finalize, keep it conservative and mark "
+                "the status accordingly. Context: {context}. Glossary: {glossary}. Constraints: {constraints}. "
+                "Data: {source}"
+            ),
+            output_schema_version=1,
+            default_constraints_json={"micro_pass": "entity", "max_items": 6},
+            notes="Sparse entity resolution for narration fast v2.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_narration_ambiguity_micro",
+            family_id="contextual-narration-fast-v2-vi",
+            translation_mode="contextual_v2",
+            role="ambiguity_micro_pass",
+            name="Narration Fast V2 / Ambiguity",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Resolve only the listed ambiguous narration spans. Return one item per input span and keep "
+                "the output conservative. If the ambiguity is still unsafe, keep unsafe_to_guess=true."
+            ),
+            user_prompt_template=(
+                "Resolve the listed ambiguous narration spans from {source_language} to {target_language}. "
+                "Only decide the minimum needed wording for the listed spans. Do not rewrite unrelated text. "
+                "If context is still insufficient, keep unsafe_to_guess true. Context: {context}. Glossary: "
+                "{glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=1,
+            default_constraints_json={"micro_pass": "ambiguity"},
+            notes="Sparse ambiguity resolution for narration fast v2.",
+        ),
+        TranslationPromptTemplate(
+            template_id="contextual_narration_slot_rewrite",
+            family_id="contextual-narration-fast-v2-vi",
+            translation_mode="contextual_v2",
+            role="dialogue_adaptation",
+            name="Narration Fast V2",
+            category="style",
+            source_lang="zh",
+            target_lang="vi",
+            system_prompt=(
+                "Rewrite narration canonical_text only when slot pressure requires shortening. Return exactly "
+                "one item per input item, in the same order. Keep facts, entities, and numbers unchanged. "
+                "Do not add audience address or dialogue flourishes."
+            ),
+            user_prompt_template=(
+                "Rewrite only the listed canonical_text items from {source_language} to {target_language} "
+                "to fit subtitle/TTS slot limits without changing facts. Protected entities and numbers must "
+                "stay unchanged. Return one item per input item in the same order. Context: {context}. "
+                "Glossary: {glossary}. Constraints: {constraints}. Data: {source}"
+            ),
+            output_schema_version=1,
+            default_constraints_json={"micro_pass": "slot_rewrite", "max_lines": 2, "max_cpl": 38, "target_cps": 16},
+            notes="Narration fast v2 slot rewrite micro-pass; also acts as the UI-selectable family anchor.",
+        ),
+        TranslationPromptTemplate(
             template_id="contextual_cartoon_fun_scene_planner",
             family_id="contextual-cartoon-fun-vi",
             translation_mode="contextual_v2",
@@ -461,7 +567,12 @@ def resolve_prompt_family(
 
 def is_narration_fast_template(selected_template: TranslationPromptTemplate) -> bool:
     family_id = selected_template.family_id or selected_template.template_id
-    return family_id == "contextual-narration-fast-vi"
+    return family_id in {"contextual-narration-fast-vi", "contextual-narration-fast-v2-vi"}
+
+
+def is_narration_fast_v2_template(selected_template: TranslationPromptTemplate) -> bool:
+    family_id = selected_template.family_id or selected_template.template_id
+    return family_id == "contextual-narration-fast-v2-vi"
 
 
 def save_prompt_template(project_root: Path, template: TranslationPromptTemplate) -> Path:

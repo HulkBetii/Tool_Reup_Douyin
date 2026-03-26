@@ -7,10 +7,13 @@ from app.project.bootstrap import bootstrap_project
 from app.project.database import ProjectDatabase
 from app.project.models import ProjectInitRequest
 from app.project.profiles import (
+    ensure_project_profile_state,
     ensure_project_profiles,
     list_project_profiles,
     load_project_profile_state,
+    resolve_subtitle_subtext_mode,
     resolve_project_profile_mix_defaults,
+    set_project_subtitle_subtext_mode,
 )
 
 
@@ -23,6 +26,7 @@ def test_ensure_project_profiles_writes_default_narration_profile(tmp_path: Path
     assert {profile.project_profile_id for profile in profiles} == {
         "zh-vi-narration-clear-vieneu",
         "zh-vi-narration-fast-vieneu",
+        "zh-vi-narration-fast-v2-vieneu",
     }
 
 
@@ -56,6 +60,7 @@ def test_bootstrap_project_applies_requested_project_profile(tmp_path: Path) -> 
     assert profile_state.project_profile_id == "zh-vi-narration-clear-vieneu"
     assert profile_state.recommended_original_volume == 0.07
     assert profile_state.recommended_prompt_template_id == "contextual_default_adaptation"
+    assert profile_state.subtitle_subtext_mode == "off"
 
 
 def test_bootstrap_project_applies_requested_narration_fast_profile(tmp_path: Path) -> None:
@@ -76,6 +81,25 @@ def test_bootstrap_project_applies_requested_narration_fast_profile(tmp_path: Pa
     assert profile_state is not None
     assert profile_state.project_profile_id == "zh-vi-narration-fast-vieneu"
     assert profile_state.recommended_prompt_template_id == "contextual_narration_fast_adaptation"
+    assert profile_state.subtitle_subtext_mode == "off"
+
+
+def test_bootstrap_project_applies_requested_narration_fast_v2_profile(tmp_path: Path) -> None:
+    workspace = bootstrap_project(
+        ProjectInitRequest(
+            name="Narration Fast V2 Demo",
+            root_dir=tmp_path / "narration-fast-v2-project",
+            source_language="zh",
+            target_language="vi",
+            project_profile_id="zh-vi-narration-fast-v2-vieneu",
+        )
+    )
+    profile_state = load_project_profile_state(workspace.root_dir)
+
+    assert profile_state is not None
+    assert profile_state.project_profile_id == "zh-vi-narration-fast-v2-vieneu"
+    assert profile_state.recommended_prompt_template_id == "contextual_narration_slot_rewrite"
+    assert profile_state.subtitle_subtext_mode == "off"
 
 
 def test_resolve_project_profile_mix_defaults_uses_profile_state(tmp_path: Path) -> None:
@@ -105,3 +129,22 @@ def test_resolve_project_profile_mix_defaults_uses_profile_state(tmp_path: Path)
     assert voice_volume == 1.0
     assert overridden_original_volume == 0.05
     assert overridden_voice_volume == 1.0
+
+
+def test_project_profile_state_defaults_and_updates_subtitle_subtext_mode(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    state = ensure_project_profile_state(
+        project_root,
+        project_profile_id="manual",
+        name="Manual",
+        applied_at="2026-03-26T00:00:00+00:00",
+    )
+    updated_state = set_project_subtitle_subtext_mode(
+        project_root,
+        "source_text",
+        applied_at="2026-03-26T00:10:00+00:00",
+    )
+
+    assert state.subtitle_subtext_mode == "off"
+    assert resolve_subtitle_subtext_mode(project_root) == "source_text"
+    assert updated_state.subtitle_subtext_mode == "source_text"

@@ -1,0 +1,73 @@
+{
+  "fixture_id": "zh-vi-narration-scientific-notation-autofix",
+  "class": "narration_scientific_notation_autofix",
+  "languages": [
+    "zh",
+    "vi"
+  ],
+  "kind": "regression",
+  "notes": "Narration V2 case: current line drops the exponent in scientific notation, but adjacent lines provide one unique numeric hint (`18`). Intended behavior is to repair `10^` into `10 mu 18`, clear `unsafe_to_guess`, and avoid `ambiguous_term` review. If neighboring hints conflict, the line must remain in review.",
+  "scene_id": "scene_scientific_0001",
+  "segments": [
+    {
+      "segment_id": "seg-science-0044",
+      "segment_index": 44,
+      "start_ms": 0,
+      "end_ms": 2800,
+      "source_text": "大约相当于人类全年能源消耗量的18倍。"
+    },
+    {
+      "segment_id": "seg-science-0045",
+      "segment_index": 45,
+      "start_ms": 2900,
+      "end_ms": 4200,
+      "source_text": "18倍。"
+    },
+    {
+      "segment_id": "seg-science-0046",
+      "segment_index": 46,
+      "start_ms": 4300,
+      "end_ms": 6200,
+      "source_text": "这个数字不是比喻。"
+    },
+    {
+      "segment_id": "seg-science-0047",
+      "segment_index": 47,
+      "start_ms": 6300,
+      "end_ms": 11000,
+      "source_text": "是10^的物理量。"
+    }
+  ],
+  "canonical_items": [
+    {
+      "canonical_text": "Tương đương khoảng 18 lần mức tiêu thụ năng lượng hàng năm của con người.",
+      "risk_flags": [],
+      "entities": [],
+      "needs_shortening": false,
+      "unsafe_to_guess": false
+    },
+    {
+      "canonical_text": "18 lần.",
+      "risk_flags": [],
+      "entities": [],
+      "needs_shortening": false,
+      "unsafe_to_guess": false
+    },
+    {
+      "canonical_text": "Con số này không phải là ẩn dụ.",
+      "risk_flags": [],
+      "entities": [],
+      "needs_shortening": false,
+      "unsafe_to_guess": false
+    },
+    {
+      "canonical_text": "Đó là một đại lượng vật lý ở cấp 10^.",
+      "risk_flags": [],
+      "entities": [],
+      "needs_shortening": false,
+      "unsafe_to_guess": true
+    }
+  ],
+  "expected_segment_id": "seg-science-0047",
+  "expected_canonical_text": "Đó là một đại lượng vật lý ở cấp 10 mũ 18."
+}

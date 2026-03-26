@@ -14,6 +14,18 @@ def get_roaming_appdata_root() -> Path:
     return Path.home() / "AppData" / "Roaming"
 
 
+def get_user_documents_dir() -> Path:
+    user_profile = os.environ.get("USERPROFILE")
+    base = Path(user_profile) if user_profile else Path.home()
+    return base / "Documents"
+
+
+def get_user_downloads_dir() -> Path:
+    user_profile = os.environ.get("USERPROFILE")
+    base = Path(user_profile) if user_profile else Path.home()
+    return base / "Downloads"
+
+
 def get_repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
@@ -72,3 +84,10 @@ def get_models_dir(base_dir: Path | None = None) -> Path:
 
 def get_settings_path(base_dir: Path | None = None) -> Path:
     return get_appdata_dir(base_dir) / "settings.json"
+
+
+def get_default_workspace_dir() -> Path:
+    if not getattr(sys, "frozen", False):
+        repo_workspace = get_repo_root() / "workspace"
+        return ensure_directory(repo_workspace)
+    return ensure_directory(get_user_documents_dir() / APP_SLUG / "workspace")

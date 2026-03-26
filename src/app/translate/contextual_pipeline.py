@@ -16,6 +16,7 @@ from app.project.models import (
     SegmentAnalysisRecord,
 )
 
+from .contextual_checkpoint import clear_contextual_translation_checkpoint
 from .models import TranslationPromptTemplate
 from .openai_engine import OpenAITranslationEngine
 from .presets import resolve_prompt_family
@@ -73,7 +74,7 @@ def build_contextual_translation_stage_hash(
             "model": model,
             "source_language": source_language,
             "target_language": target_language,
-            "version": 3,
+            "version": 4,
         }
     )
 
@@ -468,6 +469,7 @@ def persist_contextual_translation_result(
         workspace.project_id,
         target_language=target_language,
     )
+    clear_contextual_translation_checkpoint(workspace, stage_hash=stage_hash)
     return cache_path
 
 
