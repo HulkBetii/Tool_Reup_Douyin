@@ -12,6 +12,7 @@ from app.subtitle.editing import (
     build_subtitle_event_records,
     format_timestamp_ms,
     merge_editor_rows,
+    neutralize_narration_review_text,
     normalize_tts_text,
     parse_timestamp_ms,
     split_editor_row,
@@ -33,6 +34,15 @@ def test_timestamp_helpers_and_subtitle_fallback() -> None:
 
     with pytest.raises(ValueError):
         parse_timestamp_ms("00:99:00.000")
+
+
+def test_neutralize_narration_review_text_prefers_neutral_wording() -> None:
+    assert (
+        neutralize_narration_review_text("Bạn đã chuẩn bị chưa? Giờ chúng ta bắt đầu nhé.")
+        == "Giờ bắt đầu."
+    )
+    assert neutralize_narration_review_text("Điều này, bạn thấy có đúng không?") == "Điều này."
+    assert neutralize_narration_review_text("Chúng ta hãy nhìn vào con số này nhé.") == "Nhìn vào con số này."
 
 
 def test_apply_segment_edits_updates_db(tmp_path: Path) -> None:

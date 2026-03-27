@@ -81,6 +81,7 @@ from app.subtitle.editing import (
     build_subtitle_event_records,
     format_timestamp_ms,
     merge_editor_rows,
+    neutralize_narration_review_text,
     parse_timestamp_ms,
     split_editor_row,
     suggest_subtitle_text,
@@ -207,6 +208,7 @@ class MainWindow(QMainWindow):
         self._project_name_user_edited = False
         self._project_root_user_edited = False
         self._default_project_dir_seed = datetime.now().strftime("video-moi-%Y%m%d-%H%M%S")
+        self._current_review_reason_codes: list[str] = []
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.resize(1360, 860)
@@ -392,8 +394,126 @@ class MainWindow(QMainWindow):
         ):
             self._set_form_row_visible(self._export_form, field, not simple_mode)
         self._reload_export_presets_button.setVisible(not simple_mode)
+        self._sync_review_form_for_ui_mode()
         self._sync_ui_mode_controls()
         self._apply_default_form_values()
+
+    def _reset_review_fix_suggestions(self) -> None:
+        with QSignalBlocker(self._review_fix_suggestion_combo):
+            self._review_fix_suggestion_combo.clear()
+            self._review_fix_suggestion_combo.addItem("Gợi ý sửa sẽ hiện ở đây")
+            self._review_fix_suggestion_combo.setCurrentIndex(0)
+        self._review_fix_suggestion_combo.setEnabled(False)
+
+    def _review_fix_suggestions_for_reason_codes(self, reason_codes: list[str]) -> list[str]:
+        reason_set = {str(code or "").strip() for code in reason_codes if str(code or "").strip()}
+        suggestions: list[str] = []
+        if self._is_simple_ui_mode():
+            suggestions.extend(
+                [
+                    "Ưu tiên sửa: Phụ đề duyệt + Lời TTS duyệt",
+                    "Giữ nguyên: Speaker = narrator, Listener = audience",
+                    "Không sửa: Tự xưng / Gọi người nghe (để trống)",
+                ]
+            )
+        else:
+            suggestions.append("Ưu tiên sửa: Phụ đề duyệt + Lời TTS duyệt trước")
+
+        if reason_set & {
+            "sub_tts_pronoun_divergence",
+            "honorific_drift",
+            "pronoun_without_evidence",
+            "addressee_mismatch",
+            "directionality_mismatch",
+        }:
+            suggestions.extend(
+                [
+                    "Sửa: Phụ đề duyệt + Lời TTS duyệt thành cùng một câu trung tính",
+                    "Không thêm tôi / bạn / chúng ta nếu không có chứng cứ rõ",
+                ]
+            )
+        if reason_set & {"ambiguous_term", "technical_term_uncertainty"}:
+            suggestions.extend(
+                [
+                    "Sửa: thuật ngữ / thực thể trong cả hai ô Phụ đề duyệt + Lời TTS duyệt",
+                    "Giữ cùng một cách gọi ở cả hai ô",
+                ]
+            )
+        if reason_set & {"slot_pressure", "duration_overflow"}:
+            suggestions.extend(
+                [
+                    "Sửa: rút ngắn câu trong cả hai ô",
+                    "Giữ nguyên số liệu / thực thể / ý nghĩa chính",
+                ]
+            )
+        if reason_set & {"uncertain_speaker", "unclear_relationship", "tone_ambiguity"}:
+            suggestions.extend(
+                [
+                    "Nếu đây là thoại thật nhiều người, chuyển sang Nâng cao để sửa Speaker / Listener",
+                    "Nếu vẫn là narration, chỉ giữ câu trung tính ở hai ô text",
+                ]
+            )
+        if not suggestions:
+            suggestions.append("Thường chỉ cần sửa Phụ đề duyệt + Lời TTS duyệt")
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in suggestions:
+            normalized = item.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(normalized)
+        return deduped
+
+    def _populate_review_fix_suggestions(self, reason_codes: list[str]) -> None:
+        suggestions = self._review_fix_suggestions_for_reason_codes(reason_codes)
+        with QSignalBlocker(self._review_fix_suggestion_combo):
+            self._review_fix_suggestion_combo.clear()
+            for item in suggestions:
+                self._review_fix_suggestion_combo.addItem(item)
+            self._review_fix_suggestion_combo.setCurrentIndex(0)
+        self._review_fix_suggestion_combo.setEnabled(bool(suggestions))
+
+    def _sync_review_form_for_ui_mode(self) -> None:
+        simple_mode = self._is_simple_ui_mode()
+        for widget in (
+            self._review_speaker_input,
+            self._review_listener_input,
+            self._review_self_term_input,
+            self._review_address_term_input,
+        ):
+            widget.setEnabled(not simple_mode)
+        self._approve_relation_review_button.setVisible(not simple_mode)
+        self._select_relation_review_button.setVisible(not simple_mode)
+        if simple_mode:
+            review_mode_tooltip = (
+                "Simple V2 mặc định review theo narration trung tính. "
+                "Muốn sửa speaker/xưng hô, hãy chuyển sang Nâng cao."
+            )
+            for widget in (
+                self._review_speaker_input,
+                self._review_listener_input,
+                self._review_self_term_input,
+                self._review_address_term_input,
+            ):
+                widget.setToolTip(review_mode_tooltip)
+            self._review_fix_suggestion_combo.setToolTip(
+                "Danh sách này gợi ý nên sửa trường nào trước cho dòng review đang chọn."
+            )
+        else:
+            for widget in (
+                self._review_speaker_input,
+                self._review_listener_input,
+                self._review_self_term_input,
+                self._review_address_term_input,
+                self._review_fix_suggestion_combo,
+            ):
+                widget.setToolTip("")
+        if self._current_review_reason_codes:
+            self._populate_review_fix_suggestions(self._current_review_reason_codes)
+        else:
+            self._reset_review_fix_suggestions()
 
     @staticmethod
     def _normalize_project_name(raw_value: str, *, fallback: str) -> str:
@@ -863,37 +983,48 @@ class MainWindow(QMainWindow):
         self._review_context_text.setMinimumHeight(120)
         review_layout.addWidget(self._review_context_text)
         review_form = QFormLayout()
+        self._review_form = review_form
         self._review_speaker_input = QLineEdit()
         self._review_listener_input = QLineEdit()
         self._review_self_term_input = QLineEdit()
         self._review_address_term_input = QLineEdit()
         self._review_subtitle_input = QLineEdit()
         self._review_tts_input = QLineEdit()
+        self._review_fix_suggestion_combo = QComboBox()
+        self._review_fix_suggestion_combo.setEnabled(False)
+        self._review_fix_suggestion_combo.addItem("Gợi ý sửa sẽ hiện ở đây")
         review_form.addRow("Speaker", self._review_speaker_input)
         review_form.addRow("Listener", self._review_listener_input)
         review_form.addRow("Tự xưng", self._review_self_term_input)
         review_form.addRow("Gọi người nghe", self._review_address_term_input)
         review_form.addRow("Phụ đề duyệt", self._review_subtitle_input)
         review_form.addRow("Lời TTS duyệt", self._review_tts_input)
+        review_form.addRow("Gợi ý sửa", self._review_fix_suggestion_combo)
         review_layout.addLayout(review_form)
         review_button_row = QHBoxLayout()
         reload_review_button = QPushButton("Nạp review")
         reload_review_button.clicked.connect(self._reload_review_queue)
+        neutral_narration_button = QPushButton("Narration trung tính")
+        self._neutral_narration_review_button = neutral_narration_button
+        neutral_narration_button.clicked.connect(self._apply_neutral_narration_review_preset)
         approve_line_button = QPushButton("Khóa dòng")
         approve_line_button.clicked.connect(lambda checked=False: self._apply_review_resolution("line"))
         approve_scene_button = QPushButton("Khóa scene")
         approve_scene_button.clicked.connect(lambda checked=False: self._apply_review_resolution("scene"))
         approve_relation_button = QPushButton("Khóa quan hệ")
+        self._approve_relation_review_button = approve_relation_button
         approve_relation_button.clicked.connect(
             lambda checked=False: self._apply_review_resolution("project-relationship")
         )
         select_scene_button = QPushButton("Chọn cùng scene")
         select_scene_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("scene"))
         select_relation_button = QPushButton("Chọn cùng quan hệ")
+        self._select_relation_review_button = select_relation_button
         select_relation_button.clicked.connect(lambda checked=False: self._select_review_rows_by_scope("relation"))
         approve_selected_button = QPushButton("Áp cho dòng chọn")
         approve_selected_button.clicked.connect(self._apply_review_resolution_to_selected_rows)
         review_button_row.addWidget(reload_review_button)
+        review_button_row.addWidget(neutral_narration_button)
         review_button_row.addWidget(approve_line_button)
         review_button_row.addWidget(approve_scene_button)
         review_button_row.addWidget(approve_relation_button)
@@ -6199,6 +6330,7 @@ class MainWindow(QMainWindow):
 
     def _reload_review_queue(self) -> None:
         self._pending_review_segment_id = None
+        self._current_review_reason_codes = []
         self._review_table.setRowCount(0)
         self._review_context_text.clear()
         for widget in (
@@ -6210,12 +6342,15 @@ class MainWindow(QMainWindow):
             self._review_tts_input,
         ):
             widget.clear()
+        self._reset_review_fix_suggestions()
         if not self._current_workspace:
             self._review_summary.setText("Chưa có dự án")
+            self._sync_review_form_for_ui_mode()
             return
         database = ProjectDatabase(self._current_workspace.database_path)
         if self._current_translation_mode(database.get_project()) != "contextual_v2":
             self._review_summary.setText("Dự án này đang dùng chế độ dịch legacy")
+            self._sync_review_form_for_ui_mode()
             return
         review_rows = database.list_review_queue_items(self._current_workspace.project_id)
         self._review_summary.setText(
@@ -6245,6 +6380,7 @@ class MainWindow(QMainWindow):
                 self._review_table.setItem(row_index, column_index, item)
         if review_rows:
             self._review_table.selectRow(0)
+        self._sync_review_form_for_ui_mode()
 
     def _handle_review_selection_changed(self) -> None:
         if not self._current_workspace:
@@ -6266,14 +6402,23 @@ class MainWindow(QMainWindow):
         speaker = self._analysis_json_field(analysis_row, "speaker_json", {})
         listeners = self._analysis_json_field(analysis_row, "listeners_json", [])
         policy = self._analysis_json_field(analysis_row, "honorific_policy_json", {})
-        self._review_speaker_input.setText(str(speaker.get("character_id", "")))
-        self._review_listener_input.setText(
-            str((listeners[0] or {}).get("character_id", "")) if listeners else ""
-        )
-        self._review_self_term_input.setText(str(policy.get("self_term", "")))
-        self._review_address_term_input.setText(str(policy.get("address_term", "")))
+        review_reason_codes = self._analysis_json_field(analysis_row, "review_reason_codes_json", [])
+        self._current_review_reason_codes = [str(item) for item in review_reason_codes if str(item).strip()]
+        if self._is_simple_ui_mode():
+            self._review_speaker_input.setText("narrator")
+            self._review_listener_input.setText("audience")
+            self._review_self_term_input.clear()
+            self._review_address_term_input.clear()
+        else:
+            self._review_speaker_input.setText(str(speaker.get("character_id", "")))
+            self._review_listener_input.setText(
+                str((listeners[0] or {}).get("character_id", "")) if listeners else ""
+            )
+            self._review_self_term_input.setText(str(policy.get("self_term", "")))
+            self._review_address_term_input.setText(str(policy.get("address_term", "")))
         self._review_subtitle_input.setText(str(analysis_row["approved_subtitle_text"] or ""))
         self._review_tts_input.setText(str(analysis_row["approved_tts_text"] or ""))
+        self._populate_review_fix_suggestions(self._current_review_reason_codes)
 
         review_row = next(
             (
@@ -6304,7 +6449,6 @@ class MainWindow(QMainWindow):
             if subtitle_preview or tts_preview:
                 context_lines.append(f"{prefix}        VI-sub: {subtitle_preview}")
                 context_lines.append(f"{prefix}        VI-tts: {tts_preview}")
-        review_reason_codes = self._analysis_json_field(analysis_row, "review_reason_codes_json", [])
         review_question = str(analysis_row["review_question"] or "")
         scene_summary = str(review_row["short_scene_summary"] or "") if review_row is not None else ""
         self._review_context_text.setPlainText(
@@ -6320,6 +6464,7 @@ class MainWindow(QMainWindow):
                 ]
             )
         )
+        self._sync_review_form_for_ui_mode()
         self._review_context_text.setPlainText(
             "\n".join(
                 [
@@ -6393,6 +6538,75 @@ class MainWindow(QMainWindow):
             if segment_id:
                 segment_ids.append(segment_id)
         return segment_ids
+
+    def _apply_neutral_narration_review_preset(self) -> None:
+        if not self._pending_review_segment_id:
+            QMessageBox.warning(self, "Review", "Hãy chọn một dòng review trước.")
+            return
+        canonical_source = self._review_tts_input.text().strip() or self._review_subtitle_input.text().strip()
+        canonical_text = neutralize_narration_review_text(canonical_source) or canonical_source
+        self._review_speaker_input.setText("narrator")
+        self._review_listener_input.setText("audience")
+        self._review_self_term_input.clear()
+        self._review_address_term_input.clear()
+        if canonical_text:
+            self._review_subtitle_input.setText(canonical_text)
+            self._review_tts_input.setText(canonical_text)
+
+    def _select_review_row_by_segment_id(self, segment_id: str) -> None:
+        target_segment_id = str(segment_id or "").strip()
+        if not target_segment_id:
+            return
+        for row_index in range(self._review_table.rowCount()):
+            item = self._review_table.item(row_index, 0)
+            if item is None:
+                continue
+            row_segment_id = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            if row_segment_id != target_segment_id:
+                continue
+            self._review_table.selectRow(row_index)
+            self._handle_review_selection_changed()
+            return
+
+    def _pending_review_rows_by_segment_id(self, segment_ids: set[str]) -> dict[str, object]:
+        if not self._current_workspace or not segment_ids:
+            return {}
+        database = ProjectDatabase(self._current_workspace.database_path)
+        return {
+            str(row["segment_id"]): row
+            for row in database.list_review_queue_items(self._current_workspace.project_id)
+            if str(row["segment_id"]) in segment_ids
+        }
+
+    def _format_review_reopen_message(self, remaining_rows: list[object]) -> str:
+        if not remaining_rows:
+            return ""
+        lines = ["Đã lưu review nhưng các dòng này vẫn cần duyệt lại:"]
+        narration_like = False
+        for row in remaining_rows[:5]:
+            speaker = self._analysis_json_field(row, "speaker_json", {})
+            listeners = self._analysis_json_field(row, "listeners_json", [])
+            reasons = self._analysis_json_field(row, "review_reason_codes_json", [])
+            speaker_id = str((speaker or {}).get("character_id", "") or "").strip().lower()
+            listener_id = (
+                str((listeners[0] or {}).get("character_id", "") or "").strip().lower() if listeners else ""
+            )
+            if speaker_id == "narrator" or listener_id == "audience":
+                narration_like = True
+            line_number = int(row["segment_index"]) + 1
+            reason_text = ", ".join(str(item) for item in reasons) or "không rõ lý do"
+            lines.append(f"- Dòng {line_number}: {reason_text}")
+        if len(remaining_rows) > 5:
+            lines.append(f"- ... và thêm {len(remaining_rows) - 5} dòng khác")
+        if narration_like:
+            lines.extend(
+                [
+                    "",
+                    "Mẹo: nếu đây là narration trung tính, bấm 'Narration trung tính' để xóa xưng hô",
+                    "và đồng bộ Phụ đề/Lời TTS trước khi khóa lại.",
+                ]
+            )
+        return "\n".join(lines)
 
     def _select_review_rows_by_scope(self, scope: str) -> None:
         if not self._current_workspace:
@@ -6488,6 +6702,18 @@ class MainWindow(QMainWindow):
         self._reload_subtitle_editor_from_db(force=True)
         self._reload_review_queue()
         self._refresh_workspace_views()
+        target_segment_ids = {
+            str(item).strip() for item in (explicit_segment_ids or [segment_id]) if str(item).strip()
+        }
+        remaining_rows = self._pending_review_rows_by_segment_id(target_segment_ids)
+        if remaining_rows:
+            first_segment_id = next(iter(remaining_rows))
+            self._select_review_row_by_segment_id(first_segment_id)
+            QMessageBox.information(
+                self,
+                "Review",
+                self._format_review_reopen_message(list(remaining_rows.values())),
+            )
         resolution_label = "dòng chọn" if explicit_segment_ids else scope
         self._append_log_line(f"Đã áp review resolution cho {updated_count} dòng ({resolution_label})")
 

@@ -204,6 +204,16 @@ Narration incremental rerun v1:
   - [src/app/project/database.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\project\database.py)
 - UI review surface:
   - [src/app/ui/main_window.py](C:\Users\HulkBeoti\Documents\Reup_Video\src\app\ui\main_window.py)
+  - review UI now includes a `Narration trung tính` helper to clear narration honorific fields
+    and sync `subtitle/tts` before approval; it now prefers `Lời TTS duyệt` as the base
+    text and runs a deterministic neutralization pass to strip common audience-addressing
+    tails such as `... bạn`, `... đúng không`, or `... nhé` when that can be done safely.
+    If a line reopens after `Khóa dòng`, the UI surfaces the remaining review reason codes
+    instead of failing silently.
+  - in `Đơn giản (V2)`, the review form is narration-first by default: `Speaker/Listener`
+    stay fixed at `narrator/audience`, honorific fields are disabled, relation-scope actions
+    are hidden, and a `Gợi ý sửa` dropdown points users to the fields they should edit first
+    (normally only `Phụ đề duyệt` + `Lời TTS duyệt`).
 
 ### subtitle_text / tts_text invariants
 

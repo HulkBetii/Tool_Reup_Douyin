@@ -8,6 +8,42 @@ from app.project.models import SegmentRecord, SubtitleEventRecord
 TIMECODE_PATTERN = re.compile(r"^(?P<hours>\d{1,2}):(?P<minutes>\d{2}):(?P<seconds>\d{2})[.,](?P<millis>\d{3})$")
 _TTS_WHITESPACE_PATTERN = re.compile(r"\s+")
 _TTS_PUNCT_SPACING_PATTERN = re.compile(r"\s+([,.;:?!])")
+_NARRATION_AUDIENCE_PATTERN = r"(?:các bạn|cac ban|mọi người|moi nguoi|quý vị|quy vi|bạn|ban)"
+_NARRATION_LEADING_AUDIENCE_QUESTION_PATTERN = re.compile(
+    rf"^(?:{_NARRATION_AUDIENCE_PATTERN})\b[^?!.]{{0,120}}\?\s+(?P<rest>.+)$",
+    re.IGNORECASE,
+)
+_NARRATION_LEADING_VOCATIVE_PATTERN = re.compile(
+    rf"^(?:{_NARRATION_AUDIENCE_PATTERN})(?:\s+(?:ơi|à|này))?\s*[,.:!…-]*\s*",
+    re.IGNORECASE,
+)
+_NARRATION_PREFIX_CHUNGTA_PATTERN = re.compile(
+    r"^(?P<prefix>giờ|gio|bây giờ|bay gio|hôm nay|hom nay|lúc này|luc nay)\s+"
+    r"(?:chúng ta|chung ta)\s+",
+    re.IGNORECASE,
+)
+_NARRATION_CHUNGTA_IMPERATIVE_PATTERN = re.compile(
+    r"^(?:chúng ta|chung ta)\s+(?:hãy\s+|hay\s+|cùng\s+|cung\s+)",
+    re.IGNORECASE,
+)
+_NARRATION_TRAILING_AUDIENCE_QUESTION_PATTERN = re.compile(
+    rf"(?:,\s*)?(?:{_NARRATION_AUDIENCE_PATTERN}\s+(?:thấy\s+|thay\s+)?)?"
+    r"(?:có\s+|co\s+)?(?:đúng không|dung khong)\s*[.?!…]*$",
+    re.IGNORECASE,
+)
+_NARRATION_TRAILING_CONFIRMATION_PATTERN = re.compile(
+    r"(?:,\s*)?(?:phải không|phai khong|nhỉ|nhi)\s*[.?!…]*$",
+    re.IGNORECASE,
+)
+_NARRATION_TRAILING_AUDIENCE_PATTERN = re.compile(
+    rf"(?:,\s*)?(?:{_NARRATION_AUDIENCE_PATTERN})\s*[.?!…]*$",
+    re.IGNORECASE,
+)
+_NARRATION_TRAILING_SOFTENER_PATTERN = re.compile(
+    r"(?:,\s*)?(?:nhé|nhe|nhỉ|nhi|nha|ha)\s*[.?!…]*$",
+    re.IGNORECASE,
+)
+_NARRATION_TRAILING_PUNCT_PATTERN = re.compile(r"[\s,;:!?.…-]+$")
 
 
 def format_timestamp_ms(total_ms: int) -> str:
@@ -64,6 +100,64 @@ def suggest_tts_text(
         if normalized:
             return normalized
     return ""
+
+
+def _capitalize_sentence_start(value: str) -> str:
+    candidate = value.strip()
+    if not candidate:
+        return ""
+    first = candidate[0]
+    if first.isalpha():
+        return first.upper() + candidate[1:]
+    return candidate
+
+
+def neutralize_narration_review_text(value: str) -> str:
+    candidate = normalize_tts_text(value)
+    if not candidate:
+        return ""
+
+    original = candidate
+    changed = False
+    match = _NARRATION_LEADING_AUDIENCE_QUESTION_PATTERN.match(candidate)
+    if match:
+        candidate = normalize_tts_text(match.group("rest"))
+        changed = True
+
+    updated = _NARRATION_LEADING_VOCATIVE_PATTERN.sub("", candidate)
+    if updated != candidate:
+        candidate = normalize_tts_text(updated)
+        changed = True
+
+    updated = _NARRATION_PREFIX_CHUNGTA_PATTERN.sub(lambda item: f"{item.group('prefix')} ", candidate)
+    if updated != candidate:
+        candidate = normalize_tts_text(updated)
+        changed = True
+
+    updated = _NARRATION_CHUNGTA_IMPERATIVE_PATTERN.sub("", candidate)
+    if updated != candidate:
+        candidate = normalize_tts_text(updated)
+        changed = True
+
+    for pattern in (
+        _NARRATION_TRAILING_AUDIENCE_QUESTION_PATTERN,
+        _NARRATION_TRAILING_CONFIRMATION_PATTERN,
+        _NARRATION_TRAILING_AUDIENCE_PATTERN,
+        _NARRATION_TRAILING_SOFTENER_PATTERN,
+    ):
+        updated = pattern.sub("", candidate)
+        if updated != candidate:
+            candidate = normalize_tts_text(updated)
+            changed = True
+
+    candidate = _NARRATION_TRAILING_PUNCT_PATTERN.sub("", candidate).strip()
+    if not candidate:
+        return original
+
+    candidate = _capitalize_sentence_start(candidate)
+    if changed and candidate[-1] not in ".!?…":
+        candidate = f"{candidate}."
+    return candidate
 
 
 def normalize_text(value: str) -> str:
